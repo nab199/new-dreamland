@@ -1,0 +1,9 @@
+{
+  "name": "Dreamland College Management System",
+  "description": "A comprehensive multi-branch college management system tailored for the Ethiopian higher education context.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

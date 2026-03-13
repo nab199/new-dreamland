@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: dreamland-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npx tsx server.ts
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PORT
+        value: 10000
+      - key: ALLOWED_ORIGINS
+        value: https://your-app.vercel.app
+      - key: AFROMESSAGE_MOCK_MODE
+        value: "true"
+      - key: CHAPA_MOCK_MODE
+        value: "true"
+    healthCheckPath: /api/health
