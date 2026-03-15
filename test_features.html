@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dreamland College - Feature Testing</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    h1 {
+      color: #1e40af;
+      margin-bottom: 10px;
+      font-size: 32px;
+    }
+    .subtitle {
+      color: #6b7280;
+      margin-bottom: 30px;
+    }
+    .section {
+      background: #f3f4f6;
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 20px;
+    }
+    .section h2 {
+      color: #1f2937;
+      margin-bottom: 15px;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #374151;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: border-color 0.3s;
+    }
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: #3b82f6;
+    }
+    button {
+      background: #1e40af;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    button:hover {
+      background: #1e3a8a;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .result {
+      margin-top: 15px;
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 14px;
+      display: none;
+    }
+    .result.success {
+      background: #d1fae5;
+      border: 1px solid #10b981;
+      color: #065f46;
+      display: block;
+    }
+    .result.error {
+      background: #fee2e2;
+      border: 1px solid #ef4444;
+      color: #991b1b;
+      display: block;
+    }
+    .result pre {
+      background: white;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      margin-top: 10px;
+      font-size: 12px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 10px;
+    }
+    .badge-success { background: #10b981; color: white; }
+    .badge-error { background: #ef4444; color: white; }
+    .loading {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .info-box {
+      background: #dbeafe;
+      border-left: 4px solid #3b82f6;
+      padding: 15px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    .info-box p {
+      color: #1e40af;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎓 Dreamland College Testing</h1>
+    <p class="subtitle">Test SMS, Email, and API Features</p>
+
+    <div class="info-box">
+      <p><strong>📝 Instructions:</strong></p>
+      <p>1. Login to the dashboard first to get your authentication token</p>
+      <p>2. The token will be automatically used for API requests</p>
+      <p>3. Check the results section after each test</p>
+    </div>
+
+    <!-- SMS Test -->
+    <div class="section">
+      <h2>📱 Test SMS <span id="sms-badge"></span></h2>
+      <div class="grid">
+        <div class="input-group">
+          <label>Phone Number</label>
+          <input type="text" id="sms-phone" value="+251913224991" placeholder="+251913224991">
+        </div>
+        <div class="input-group">
+          <label>Message</label>
+          <input type="text" id="sms-message" value="🎓 Test message from Dreamland College! Your SMS system is working correctly.">
+        </div>
+      </div>
+      <button onclick="testSMS()" id="sms-btn">
+        <span>📤 Send Test SMS</span>
+      </button>
+      <div class="result" id="sms-result"></div>
+    </div>
+
+    <!-- Password Reset Test -->
+    <div class="section">
+      <h2>🔐 Test Password Reset <span id="email-badge"></span></h2>
+      <div class="input-group">
+        <label>Email Address</label>
+        <input type="email" id="reset-email" value="nabiotsamuel690@gmail.com" placeholder="email@example.com">
+      </div>
+      <button onclick="testPasswordReset()" id="reset-btn">
+        <span>🔑 Request Password Reset</span>
+      </button>
+      <div class="result" id="reset-result"></div>
+    </div>
+
+    <!-- AI Features Test -->
+    <div class="section">
+      <h2>🤖 Test AI Features <span id="ai-badge"></span></h2>
+      <div class="grid">
+        <div class="input-group">
+          <label>Student ID</label>
+          <input type="number" id="ai-student-id" value="1" placeholder="1">
+        </div>
+        <div class="input-group">
+          <label>Course ID</label>
+          <input type="number" id="ai-course-id" value="1" placeholder="1">
+        </div>
+      </div>
+      <button onclick="testAIGrade()" id="ai-btn">
+        <span>🧠 Predict Grade</span>
+      </button>
+      <div class="result" id="ai-result"></div>
+    </div>
+
+    <!-- Backup Test -->
+    <div class="section">
+      <h2>💾 Test Backup System <span id="backup-badge"></span></h2>
+      <button onclick="testBackup()" id="backup-btn">
+        <span>💿 Create Backup</span>
+      </button>
+      <div class="result" id="backup-result"></div>
+    </div>
+
+    <!-- Token Info -->
+    <div class="section">
+      <h2>🔑 Authentication Token</h2>
+      <div class="input-group">
+        <label>Token (auto-loaded from dashboard)</label>
+        <textarea id="auth-token" rows="3" placeholder="Paste your token here if not logged in"></textarea>
+      </div>
+      <button onclick="loadToken()" style="background: #059669;">
+        <span>🔄 Load from Dashboard</span>
+      </button>
+      <div class="result" id="token-result"></div>
+    </div>
+  </div>
+
+  <script>
+    // Get token from localStorage (if running from dashboard domain)
+    function loadToken() {
+      try {
+        const token = localStorage.getItem('dreamland_token');
+        if (token) {
+          document.getElementById('auth-token').value = token;
+          showResult('token-result', 'success', '✅ Token loaded successfully!');
+        } else {
+          showResult('token-result', 'error', '❌ No token found. Please login to the dashboard first.');
+        }
+      } catch (e) {
+        showResult('token-result', 'error', '❌ Error: ' + e.message);
+      }
+    }
+
+    function getToken() {
+      return document.getElementById('auth-token').value.trim() || 
+             localStorage.getItem('dreamland_token');
+    }
+
+    async function testSMS() {
+      const btn = document.getElementById('sms-btn');
+      const result = document.getElementById('sms-result');
+      const badge = document.getElementById('sms-badge');
+      
+      const phone = document.getElementById('sms-phone').value;
+      const message = document.getElementById('sms-message').value;
+      const token = getToken();
+
+      if (!token) {
+        showResult(result, 'error', '❌ Please login to dashboard first or paste your token');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span> Sending...';
+      badge.className = '';
+      badge.textContent = '';
+
+      try {
+        const response = await fetch('/api/sms/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ to: phone, message })
+        });
+
+        const data = await response.json();
+        
+        if (response.ok || data.success) {
+          showResult(result, 'success', '✅ SMS sent successfully!<br><pre>' + JSON.stringify(data, null, 2) + '</pre>');
+          badge.className = 'badge badge-success';
+          badge.textContent = '✓ Success';
+        } else {
+          showResult(result, 'error', '❌ Failed: ' + (data.error || 'Unknown error'));
+          badge.className = 'badge badge-error';
+          badge.textContent = '✗ Failed';
+        }
+      } catch (e) {
+        showResult(result, 'error', '❌ Error: ' + e.message);
+        badge.className = 'badge badge-error';
+        badge.textContent = '✗ Error';
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = '<span>📤 Send Test SMS</span>';
+    }
+
+    async function testPasswordReset() {
+      const btn = document.getElementById('reset-btn');
+      const result = document.getElementById('reset-result');
+      const badge = document.getElementById('email-badge');
+      
+      const email = document.getElementById('reset-email').value;
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span> Sending...';
+      badge.className = '';
+      badge.textContent = '';
+
+      try {
+        const response = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+
+        const data = await response.json();
+        
+        if (response.ok) {
+          showResult(result, 'success', 
+            '✅ Password reset request sent!<br><br>' +
+            '<strong>⚠️ Check the server console for the reset code!</strong><br>' +
+            'The code will be printed there (and sent via SMS if phone is linked).<br><br>' +
+            '<pre>' + JSON.stringify(data, null, 2) + '</pre>'
+          );
+          badge.className = 'badge badge-success';
+          badge.textContent = '✓ Sent';
+        } else {
+          showResult(result, 'error', '❌ Failed: ' + (data.error || 'Unknown error'));
+          badge.className = 'badge badge-error';
+          badge.textContent = '✗ Failed';
+        }
+      } catch (e) {
+        showResult(result, 'error', '❌ Error: ' + e.message);
+        badge.className = 'badge badge-error';
+        badge.textContent = '✗ Error';
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = '<span>🔑 Request Password Reset</span>';
+    }
+
+    async function testAIGrade() {
+      const btn = document.getElementById('ai-btn');
+      const result = document.getElementById('ai-result');
+      const badge = document.getElementById('ai-badge');
+      
+      const studentId = document.getElementById('ai-student-id').value;
+      const courseId = document.getElementById('ai-course-id').value;
+      const token = getToken();
+
+      if (!token) {
+        showResult(result, 'error', '❌ Please login to dashboard first or paste your token');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span> Predicting...';
+      badge.className = '';
+      badge.textContent = '';
+
+      try {
+        const response = await fetch('/api/ai/predict-grade', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ student_id: parseInt(studentId), course_id: parseInt(courseId) })
+        });
+
+        const data = await response.json();
+        
+        if (response.ok) {
+          const pred = data.prediction;
+          showResult(result, 'success', 
+            `✅ Grade Prediction:<br><br>` +
+            `<strong>Predicted Grade: ${pred.predictedGrade}</strong> (Confidence: ${(pred.confidence * 100).toFixed(0)}%)<br><br>` +
+            `<strong>Risk Factors:</strong><br>` +
+            (pred.riskFactors || []).map(f => '• ' + f).join('<br>') +
+            `<br><br><strong>Recommendations:</strong><br>` +
+            (pred.recommendations || []).map(r => '• ' + r).join('<br>') +
+            `<pre>${JSON.stringify(data, null, 2)}</pre>`
+          );
+          badge.className = 'badge badge-success';
+          badge.textContent = '✓ Success';
+        } else {
+          showResult(result, 'error', '❌ Failed: ' + (data.error || 'Unknown error'));
+          badge.className = 'badge badge-error';
+          badge.textContent = '✗ Failed';
+        }
+      } catch (e) {
+        showResult(result, 'error', '❌ Error: ' + e.message);
+        badge.className = 'badge badge-error';
+        badge.textContent = '✗ Error';
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = '<span>🧠 Predict Grade</span>';
+    }
+
+    async function testBackup() {
+      const btn = document.getElementById('backup-btn');
+      const result = document.getElementById('backup-result');
+      const badge = document.getElementById('backup-badge');
+      
+      const token = getToken();
+
+      if (!token) {
+        showResult(result, 'error', '❌ Please login to dashboard first or paste your token');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span> Creating...';
+      badge.className = '';
+      badge.textContent = '';
+
+      try {
+        const response = await fetch('/api/admin/backup', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ reason: 'manual_test' })
+        });
+
+        const data = await response.json();
+        
+        if (response.ok) {
+          showResult(result, 'success', '✅ Backup created successfully!<br><pre>' + JSON.stringify(data, null, 2) + '</pre>');
+          badge.className = 'badge badge-success';
+          badge.textContent = '✓ Success';
+        } else {
+          showResult(result, 'error', '❌ Failed: ' + (data.error || 'Unknown error'));
+          badge.className = 'badge badge-error';
+          badge.textContent = '✗ Failed';
+        }
+      } catch (e) {
+        showResult(result, 'error', '❌ Error: ' + e.message);
+        badge.className = 'badge badge-error';
+        badge.textContent = '✗ Error';
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = '<span>💿 Create Backup</span>';
+    }
+
+    function showResult(element, type, message) {
+      element.className = 'result ' + type;
+      element.innerHTML = message;
+    }
+
+    // Auto-load token on page load
+    window.addEventListener('load', loadToken);
+  </script>
+</body>
+</html>

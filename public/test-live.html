@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🚀 Dreamland - SMS & Email Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    h1 {
+      color: #1e40af;
+      margin-bottom: 10px;
+      font-size: 32px;
+    }
+    .subtitle {
+      color: #6b7280;
+      margin-bottom: 30px;
+    }
+    .status-box {
+      background: #f3f4f6;
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 20px;
+    }
+    .status-box h2 {
+      color: #1f2937;
+      margin-bottom: 15px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .btn {
+      background: #1e40af;
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin: 10px 10px 10px 0;
+    }
+    .btn:hover {
+      background: #1e3a8a;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .btn-success { background: #059669; }
+    .btn-success:hover { background: #047857; }
+    .result {
+      margin-top: 15px;
+      padding: 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      display: none;
+      border-left: 4px solid;
+    }
+    .result.success {
+      background: #d1fae5;
+      border-color: #10b981;
+      color: #065f46;
+      display: block;
+    }
+    .result.error {
+      background: #fee2e2;
+      border-color: #ef4444;
+      color: #991b1b;
+      display: block;
+    }
+    .result.info {
+      background: #dbeafe;
+      border-color: #3b82f6;
+      color: #1e40af;
+      display: block;
+    }
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .check-list {
+      list-style: none;
+      margin: 20px 0;
+    }
+    .check-list li {
+      padding: 15px;
+      margin: 10px 0;
+      background: #f9fafb;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      font-size: 15px;
+    }
+    .check-list li.success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    .check-list li.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .icon {
+      font-size: 24px;
+    }
+    .code-box {
+      background: linear-gradient(135deg, #eff6ff, #dbeafe);
+      border: 2px solid #1e40af;
+      padding: 20px;
+      text-align: center;
+      margin: 20px 0;
+      border-radius: 8px;
+    }
+    .code {
+      font-size: 32px;
+      font-weight: 800;
+      color: #1e40af;
+      letter-spacing: 8px;
+      font-family: 'Courier New', monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎓 Dreamland College</h1>
+    <p class="subtitle">SMS & Email Testing Dashboard</p>
+
+    <!-- Server Status -->
+    <div class="status-box">
+      <h2><span class="icon">🖥️</span> Server Status</h2>
+      <div id="server-status">Checking...</div>
+    </div>
+
+    <!-- Test Controls -->
+    <div class="status-box">
+      <h2><span class="icon">🧪</span> Send Test Messages</h2>
+      <p style="margin-bottom: 15px; color: #6b7280;">
+        Testing with:<br>
+        📱 Phone: <strong>+251913224991</strong><br>
+        📧 Email: <strong>nabiotsamuel690@gmail.com</strong>
+      </p>
+      
+      <button class="btn" onclick="testPasswordReset()" id="reset-btn">
+        <span>🔐 Test Password Reset (SMS + Email)</span>
+      </button>
+      
+      <button class="btn btn-success" onclick="testLogin()" id="login-btn">
+        <span>🔑 Get Login Token</span>
+      </button>
+      
+      <button class="btn" onclick="testSMS()" id="sms-btn" disabled>
+        <span>📱 Test SMS Only</span>
+      </button>
+    </div>
+
+    <!-- Results -->
+    <div class="status-box">
+      <h2><span class="icon">📊</span> Results</h2>
+      <ul class="check-list" id="results-list">
+        <li>⏳ Waiting for tests...</li>
+      </ul>
+      
+      <div class="result info" id="main-result"></div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="status-box">
+      <h2><span class="icon">📝</span> What to Check</h2>
+      <ul class="check-list">
+        <li id="check-sms">⏳ Check your phone for SMS</li>
+        <li id="check-email">⏳ Check your email inbox</li>
+        <li id="check-console">⏳ Check server console for logs</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    let authToken = '';
+
+    // Check server status
+    async function checkServer() {
+      try {
+        const response = await fetch('/api/health');
+        const data = await response.json();
+        document.getElementById('server-status').innerHTML = 
+          `<div style="color: #059669; font-weight: 600;">✅ Server is running on http://localhost:${data.port || 3000}</div>`;
+        return true;
+      } catch (e) {
+        document.getElementById('server-status').innerHTML = 
+          `<div style="color: #dc2626; font-weight: 600;">❌ Server is not running. Start it with: npm run dev</div>`;
+        return false;
+      }
+    }
+
+    async function testLogin() {
+      const btn = document.getElementById('login-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span> Logging in...';
+
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'admin', password: 'admin123' })
+        });
+
+        const data = await response.json();
+        
+        if (data.token) {
+          authToken = data.token;
+          localStorage.setItem('dreamland_token', authToken);
+          document.getElementById('sms-btn').disabled = false;
+          
+          addResult('success', '✅ Login successful! Token saved.');
+          showMainResult('success', `
+            <strong>Login Successful!</strong><br>
+            Token: ${authToken.substring(0, 50)}...<br>
+            You can now use the "Test SMS Only" button.
+          `);
+        } else {
+          addResult('error', '❌ Login failed: ' + (data.error || 'Unknown error'));
+        }
+      } catch (e) {
+        addResult('error', '❌ Login error: ' + e.message);
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = '<span>🔑 Get Login Token</span>';
+    }
+
+    async function testPasswordReset() {
+      const btn = document.getElementById('reset-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span> Sending...';
+
+      addResult('info', '⏳ Sending password reset request...');
+
+      try {
+        const response = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: 'nabiotsamuel690@gmail.com' })
+        });
+
+        const data = await response.json();
+        
+        if (response.ok || data.message) {
+          addResult('success', '✅ Password reset request sent!');
+          
+          showMainResult('success', `
+            <strong>🎉 Success! Check your devices!</strong><br><br>
+            <strong>📱 SMS:</strong> Check your phone at +251913224991<br>
+            <strong>📧 Email:</strong> Check nabiotsamuel690@gmail.com<br>
+            <strong>💻 Console:</strong> Check server console for reset code<br><br>
+            ${data.debug ? `
+              <div class="code-box">
+                <div style="color: #6b7280; font-size: 14px; margin-bottom: 10px;">Reset Code (Development Mode)</div>
+                <div class="code">${data.debug.code}</div>
+              </div>
+            ` : ''}
+          `);
+
+          // Update checklist
+          document.getElementById('check-sms').className = 'success';
+          document.getElementById('check-sms').innerHTML = '✅ Check your phone - SMS should arrive shortly';
+          document.getElementById('check-email').className = 'success';
+          document.getElementById('check-email').innerHTML = '✅ Check your email - HTML email should arrive';
+          document.getElementById('check-console').className = 'success';
+          document.getElementById('check-console').innerHTML = '✅ Check server console for logs';
+        } else {
+          addResult('error', '❌ Failed: ' + (data.error || 'Unknown error'));
+        }
+      } catch (e) {
+        addResult('error', '❌ Error: ' + e.message);
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = '<span>🔐 Test Password Reset (SMS + Email)</span>';
+    }
+
+    async function testSMS() {
+      const btn = document.getElementById('sms-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span> Sending...';
+
+      addResult('info', '⏳ Sending test SMS...');
+
+      try {
+        const response = await fetch('/api/sms/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + authToken
+          },
+          body: JSON.stringify({
+            to: '+251913224991',
+            message: '🎓 Dreamland College Test - SMS is working perfectly! ' + new Date().toLocaleString()
+          })
+        });
+
+        const data = await response.json();
+        
+        if (response.ok || data.success) {
+          addResult('success', '✅ SMS sent successfully!');
+          showMainResult('success', `
+            <strong>📱 SMS Sent!</strong><br><br>
+            Check your phone at +251913224991<br>
+            You should receive: "🎓 Dreamland College Test - SMS is working perfectly!"
+          `);
+        } else {
+          addResult('error', '❌ SMS failed: ' + (data.error || 'Unknown error'));
+        }
+      } catch (e) {
+        addResult('error', '❌ SMS error: ' + e.message);
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = '<span>📱 Test SMS Only</span>';
+    }
+
+    function addResult(type, message) {
+      const list = document.getElementById('results-list');
+      const li = document.createElement('li');
+      li.className = type;
+      li.innerHTML = message;
+      list.insertBefore(li, list.firstChild);
+    }
+
+    function showMainResult(type, message) {
+      const result = document.getElementById('main-result');
+      result.className = 'result ' + type;
+      result.innerHTML = message;
+    }
+
+    // Initialize
+    window.addEventListener('load', () => {
+      checkServer();
+      // Auto-check for existing token
+      const savedToken = localStorage.getItem('dreamland_token');
+      if (savedToken) {
+        authToken = savedToken;
+        document.getElementById('sms-btn').disabled = false;
+        addResult('info', 'ℹ️ Found existing login token');
+      }
+    });
+
+    // Refresh server status every 5 seconds
+    setInterval(checkServer, 5000);
+  </script>
+</body>
+</html>

@@ -276,7 +276,7 @@ export default function LandingPage() {
               </li>
               <li className="flex items-center gap-3">
                 <MapPin size={16} className="text-emerald-600" />
-                4 Kilo, Addis Ababa
+                kedus urael hentsa, Addis Ababa
               </li>
             </ul>
           </div>

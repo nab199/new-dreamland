@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTranslation } from 'react-i18next';
+import { useToast } from '../context/ToastContext';
 import { motion } from 'framer-motion';
 import { GraduationCap, Lock, User, AlertCircle } from 'lucide-react';
 import axios from 'axios';
@@ -9,9 +10,11 @@ import axios from 'axios';
 export default function LoginPage() {
   const { t } = useTranslation();
   const { login } = useAuth();
+  const { showToast } = useToast();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -20,11 +23,14 @@ export default function LoginPage() {
     setIsLoading(true);
     setError('');
     try {
-      const response = await axios.post('/api/auth/login', { username, password });
-      login(response.data.token, response.data.user);
+      const response = await axios.post('/api/auth/login', { username, password, rememberMe });
+      login(response.data.token, response.data.user, rememberMe);
+      showToast(`Welcome back, ${response.data.user.full_name || username}!`);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed. Please try again.');
+      const errorMsg = err.response?.data?.error || 'Login failed. Please try again.';
+      setError(errorMsg);
+      showToast(errorMsg, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -32,7 +38,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="max-w-md w-full"
@@ -45,7 +51,7 @@ export default function LoginPage() {
             <h1 className="text-2xl font-bold">Dreamland College</h1>
             <p className="text-emerald-100 text-sm mt-1">Management Information System</p>
           </div>
-          
+
           <div className="p-8">
             <form onSubmit={handleSubmit} className="space-y-6">
               {error && (
@@ -54,7 +60,7 @@ export default function LoginPage() {
                   {error}
                 </div>
               )}
-              
+
               <div>
                 <label className="block text-sm font-semibold text-stone-700 mb-2">{t('username')}</label>
                 <div className="relative">
@@ -85,6 +91,25 @@ export default function LoginPage() {
                 </div>
               </div>
 
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
+                  />
+                  <span className="text-sm text-stone-600">Remember me</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => navigate('/forgot-password')}
+                  className="text-sm text-emerald-600 font-semibold hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </div>
+
               <button
                 type="submit"
                 disabled={isLoading}
@@ -95,20 +120,17 @@ export default function LoginPage() {
                 ) : t('login')}
               </button>
             </form>
-            
+
             <div className="mt-8 pt-8 border-t border-stone-100 text-center">
-              <p className="text-sm text-stone-500 mb-2">
-                Forgot password? Contact your branch registrar.
-              </p>
-              <p className="text-sm text-stone-600">
+              <p className="text-sm text-stone-600 mb-2">
                 Don't have an account? <button onClick={() => navigate('/public-registration')} className="text-emerald-600 font-bold hover:underline">Register here</button>
               </p>
             </div>
           </div>
         </div>
-        
+
         <div className="mt-8 text-center">
-          <button 
+          <button
             onClick={() => navigate('/')}
             className="text-stone-500 hover:text-emerald-600 text-sm font-medium transition-colors"
           >

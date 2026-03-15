@@ -1,0 +1,2 @@
+# Ignore mobile_app folder from main project checks
+mobile_app/
