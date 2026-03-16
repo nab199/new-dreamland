@@ -9,6 +9,7 @@ import multer from "multer";
 import fs from "fs";
 import crypto from "crypto";
 import { CBEVerificationService } from './src/services/payment/cbeVerificationService';
+import { authConfig } from './src/config/AuthConfig';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { parse } from 'csv-parse/sync';
@@ -521,10 +522,7 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
 
   // Environment validation
-  const JWT_SECRET = process.env.JWT_SECRET || "dreamland-secret-key";
-  if (process.env.NODE_ENV === 'production' && JWT_SECRET === "dreamland-secret-key") {
-    console.error("⚠️  WARNING: Using default JWT secret in production. Set JWT_SECRET env var!");
-  }
+  const JWT_SECRET = authConfig.jwtSecret;
 
   // Public API Routes
   app.get("/api/public/branches", (req, res) => {
@@ -2732,7 +2730,7 @@ async function startServer() {
       .digest('hex');
 
     const digitalSignature = crypto
-      .createHmac('sha256', process.env.JWT_SECRET || 'secret')
+      .createHmac('sha256', authConfig.jwtSecret)
       .update(transcriptHash)
       .digest('hex');
 
