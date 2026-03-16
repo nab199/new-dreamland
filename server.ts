@@ -248,6 +248,19 @@ try {
   db.prepare("ALTER TABLE students ADD COLUMN financial_clearance INTEGER DEFAULT 0").run();
 } catch (e) {}
 
+// Migrations for users table security enhancements
+try {
+  db.prepare("ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER DEFAULT 0").run();
+} catch (e) {}
+
+try {
+  db.prepare("ALTER TABLE users ADD COLUMN locked_until TEXT").run();
+} catch (e) {}
+
+try {
+  db.prepare("ALTER TABLE users ADD COLUMN email TEXT").run();
+} catch (e) {}
+
 // Add grade columns to enrollments if they don't exist
 try {
   db.prepare("ALTER TABLE enrollments ADD COLUMN assignment_grade REAL").run();
