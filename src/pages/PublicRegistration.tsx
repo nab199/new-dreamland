@@ -215,55 +215,6 @@ export default function PublicRegistration() {
     setFiles(prev => ({ ...prev, [field]: acceptedFiles[0] }));
   }, []);
 
-  const DropzoneField = ({ field, label }: { field: string, label: string }) => {
-    const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
-      onDrop: (acceptedFiles: File[]) => onDrop(acceptedFiles, field),
-      multiple: false,
-      accept: { 'image/*': ['.jpeg', '.jpg', '.png'], 'application/pdf': ['.pdf'] }
-    } as any);
-    return (
-      <div className="flex-1">
-        <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-2">{label}</label>
-        <div {...getRootProps()} className={`p-4 border-2 border-dashed rounded-2xl cursor-pointer transition-all h-32 flex flex-col items-center justify-center text-center ${isDragActive ? 'border-emerald-500 bg-emerald-50' : files[field] ? 'border-emerald-200 bg-emerald-50' : 'border-stone-200 bg-white hover:border-emerald-400'}`}>
-          <input {...getInputProps()} />
-          {files[field] ? (
-            <div className="flex flex-col items-center">
-              <CheckCircle className="text-emerald-500 mb-1" size={24} />
-              <p className="text-[10px] text-stone-600 truncate max-w-[100px]">{files[field]?.name}</p>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center text-stone-400">
-              <Upload className="mb-1" size={24} />
-              <p className="text-[10px] leading-tight font-bold">UPLOAD</p>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  const InputField = ({ label, name, icon: Icon, type = "text", ...props }: any) => (
-    <div className="space-y-2">
-      <label className="text-sm font-bold text-stone-700 block">{label}</label>
-      <div className="relative group">
-        {Icon && <Icon className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${errors[name] ? 'text-red-400' : 'text-stone-400 group-focus-within:text-emerald-500'}`} size={18} />}
-        <input 
-          type={type}
-          value={formData[name as keyof typeof formData]}
-          onChange={(e) => {
-            let val = e.target.value;
-            if (name === 'transaction_ref') val = val.toUpperCase();
-            setFormData({...formData, [name]: val});
-          }}
-          className={`w-full ${Icon ? 'pl-12' : 'pl-4'} pr-4 py-3.5 bg-stone-50 border-2 rounded-2xl outline-none transition-all ${errors[name] ? 'border-red-200 focus:border-red-500 bg-red-50' : 'border-stone-100 focus:border-emerald-500 bg-stone-50'}`}
-          {...props}
-        />
-        {errors[name] && <AlertCircle className="absolute right-4 top-1/2 -translate-y-1/2 text-red-500" size={18} />}
-      </div>
-      {errors[name] && <p className="text-red-500 text-[11px] font-semibold">{errors[name]}</p>}
-    </div>
-  );
-
   return (
     <div className="min-h-screen bg-stone-50 font-sans text-stone-900 pb-20">
       <AnimatePresence>
@@ -317,10 +268,10 @@ export default function PublicRegistration() {
                 <div><h2 className="text-2xl font-black text-stone-900">{t('registration')}</h2><p className="text-stone-500 text-sm font-medium">Personal and academic identification</p></div>
               </div>
               <div className="grid md:grid-cols-2 gap-8">
-                <InputField label={t('full_name')} name="full_name" icon={User} placeholder="e.g. Abebe Kebede" />
-                <InputField label={t('birth_year')} name="birth_year" type="number" placeholder="e.g. 1995" />
-                <div className="relative"><InputField label={t('phone')} name="phone" icon={Phone} placeholder="09... or +251..." />{isPhoneVerified && <div className="absolute right-12 top-[44px] text-emerald-500 flex items-center gap-1 font-bold text-[10px] uppercase bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100"><ShieldCheck size={12}/> Verified</div>}</div>
-                <div className="relative"><InputField label={t('email')} name="email" icon={Mail} type="email" placeholder="email@example.com" />{isEmailVerified && <div className="absolute right-12 top-[44px] text-emerald-500 flex items-center gap-1 font-bold text-[10px] uppercase bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100"><ShieldCheck size={12}/> Verified</div>}</div>
+                <InputField label={t('full_name')} name="full_name" icon={User} placeholder="e.g. Abebe Kebede" formData={formData} setFormData={setFormData} errors={errors} />
+                <InputField label={t('birth_year')} name="birth_year" type="number" placeholder="e.g. 1995" formData={formData} setFormData={setFormData} errors={errors} />
+                <div className="relative"><InputField label={t('phone')} name="phone" icon={Phone} placeholder="09... or +251..." formData={formData} setFormData={setFormData} errors={errors} />{isPhoneVerified && <div className="absolute right-12 top-[44px] text-emerald-500 flex items-center gap-1 font-bold text-[10px] uppercase bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100"><ShieldCheck size={12}/> Verified</div>}</div>
+                <div className="relative"><InputField label={t('email')} name="email" icon={Mail} type="email" placeholder="email@example.com" formData={formData} setFormData={setFormData} errors={errors} />{isEmailVerified && <div className="absolute right-12 top-[44px] text-emerald-500 flex items-center gap-1 font-bold text-[10px] uppercase bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100"><ShieldCheck size={12}/> Verified</div>}</div>
                 <div className="space-y-2"><label className="text-sm font-bold text-stone-700 block">{t('student_type')}</label><select value={formData.student_type} onChange={(e) => setFormData({...formData, student_type: e.target.value})} className="w-full px-4 py-3.5 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500 font-semibold"><option value="">Select Type</option>{['Regular', 'Extension', 'Weekend', 'Distance'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                 <div className="space-y-2"><label className="text-sm font-bold text-stone-700 block">{t('program')}</label><select value={formData.program_id} onChange={(e) => setFormData({...formData, program_id: e.target.value})} className="w-full px-4 py-3.5 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500 font-semibold"><option value="">Select Program</option>{programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
                 <div className="space-y-2"><label className="text-sm font-bold text-stone-700 block">{t('program_degree')}</label><select value={formData.program_degree} onChange={(e) => setFormData({...formData, program_degree: e.target.value})} className="w-full px-4 py-3.5 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500 font-semibold"><option value="">Select Level</option>{['Masters', 'Degree', 'Diploma', 'Certificate'].map(d => <option key={d} value={d}>{d}</option>)}</select></div>
@@ -332,8 +283,8 @@ export default function PublicRegistration() {
           {step === 2 && (
             <div className="space-y-10">
               <div className="flex items-center gap-4 border-b border-stone-100 pb-6"><div className="w-12 h-12 bg-stone-100 rounded-2xl flex items-center justify-center text-emerald-600"><MapPin size={24} /></div><div><h2 className="text-2xl font-black text-stone-900">{t('address')}</h2><p className="text-stone-500 text-sm font-medium">Where do you currently reside?</p></div></div>
-              <div className="grid md:grid-cols-2 gap-8"><div className="space-y-2"><label className="text-sm font-bold text-stone-700 block">{t('region')}</label><select value={formData.region} onChange={(e) => setFormData({...formData, region: e.target.value, zone: ''})} className="w-full px-4 py-3.5 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500 font-semibold"><option value="">Select Region</option>{Object.keys(ETHIOPIAN_ADDRESS_DATA).map(r => <option key={r} value={r}>{r}</option>)}</select></div><div className="space-y-2"><label className="text-sm font-bold text-stone-700 block">{t('zone')}</label><select value={formData.zone} onChange={(e) => setFormData({...formData, zone: e.target.value})} disabled={!formData.region} className="w-full px-4 py-3.5 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500 font-semibold disabled:opacity-50"><option value="">Select Zone</option>{formData.region && ETHIOPIAN_ADDRESS_DATA[formData.region].map(z => <option key={z} value={z}>{z}</option>)}</select></div><InputField label={t('woreda')} name="woreda" placeholder="e.g. Woreda 01" /><InputField label={t('kebele')} name="kebele" placeholder="e.g. Kebele 05" /></div>
-              <div className="space-y-6 pt-6"><div className="flex items-center gap-4 text-emerald-700 mb-2"><Upload size={20} /><h3 className="font-black uppercase tracking-widest text-xs">{t('documents')}</h3></div><div className="grid grid-cols-2 md:grid-cols-4 gap-4"><DropzoneField field="portrait" label="Portrait" /><DropzoneField field="id_card" label="ID Card" /><DropzoneField field="diploma" label="Diploma" /><DropzoneField field="transcript" label="Transcript" /></div></div>
+              <div className="grid md:grid-cols-2 gap-8"><div className="space-y-2"><label className="text-sm font-bold text-stone-700 block">{t('region')}</label><select value={formData.region} onChange={(e) => setFormData({...formData, region: e.target.value, zone: ''})} className="w-full px-4 py-3.5 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500 font-semibold"><option value="">Select Region</option>{Object.keys(ETHIOPIAN_ADDRESS_DATA).map(r => <option key={r} value={r}>{r}</option>)}</select></div><div className="space-y-2"><label className="text-sm font-bold text-stone-700 block">{t('zone')}</label><select value={formData.zone} onChange={(e) => setFormData({...formData, zone: e.target.value})} disabled={!formData.region} className="w-full px-4 py-3.5 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500 font-semibold disabled:opacity-50"><option value="">Select Zone</option>{formData.region && ETHIOPIAN_ADDRESS_DATA[formData.region].map(z => <option key={z} value={z}>{z}</option>)}</select></div><InputField label={t('woreda')} name="woreda" placeholder="e.g. Woreda 01" formData={formData} setFormData={setFormData} errors={errors} /><InputField label={t('kebele')} name="kebele" placeholder="e.g. Kebele 05" formData={formData} setFormData={setFormData} errors={errors} /></div>
+              <div className="space-y-6 pt-6"><div className="flex items-center gap-4 text-emerald-700 mb-2"><Upload size={20} /><h3 className="font-black uppercase tracking-widest text-xs">{t('documents')}</h3></div><div className="grid grid-cols-2 md:grid-cols-4 gap-4"><DropzoneField field="portrait" label="Portrait" files={files} onDrop={onDrop} /><DropzoneField field="id_card" label="ID Card" files={files} onDrop={onDrop} /><DropzoneField field="diploma" label="Diploma" files={files} onDrop={onDrop} /><DropzoneField field="transcript" label="Transcript" files={files} onDrop={onDrop} /></div></div>
             </div>
           )}
 
@@ -341,8 +292,8 @@ export default function PublicRegistration() {
             <div className="space-y-8">
               <div className="flex items-center gap-4 border-b border-stone-100 pb-6"><div className="w-12 h-12 bg-stone-100 rounded-2xl flex items-center justify-center text-emerald-600"><CreditCard size={24} /></div><div><h2 className="text-2xl font-black text-stone-900">{t('payment')}</h2><p className="text-stone-500 text-sm font-medium">Verify your registration fee</p></div></div>
               <div className="space-y-8"><div className="flex gap-4 p-1 bg-stone-100 rounded-2xl">{['cash', 'cbe_receipt'].map((method) => (<button key={method} type="button" onClick={() => setFormData({...formData, payment_method: method})} className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${formData.payment_method === method ? 'bg-white text-emerald-600 shadow-sm' : 'text-stone-500 hover:bg-stone-200'}`}>{method === 'cash' ? 'Pay at Branch' : 'CBE Receipt'}</button>))}</div>
-              {formData.payment_method === 'cbe_receipt' && (<motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid md:grid-cols-2 gap-6 bg-emerald-50 p-8 rounded-3xl border-2 border-emerald-100"><InputField label="CBE Transaction Reference" name="transaction_ref" placeholder="FT..." /><InputField label="Last 8 Digits" name="last8Digits" placeholder="Verification digits" maxLength={8} /></motion.div>)}
-              <InputField label="Create Account Password" name="password" type="password" icon={Database} placeholder="At least 6 characters" /></div>
+              {formData.payment_method === 'cbe_receipt' && (<motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid md:grid-cols-2 gap-6 bg-emerald-50 p-8 rounded-3xl border-2 border-emerald-100"><InputField label="CBE Transaction Reference" name="transaction_ref" placeholder="FT..." formData={formData} setFormData={setFormData} errors={errors} /><InputField label="Last 8 Digits" name="last8Digits" placeholder="Verification digits" maxLength={8} formData={formData} setFormData={setFormData} errors={errors} /></motion.div>)}
+              <InputField label="Create Account Password" name="password" type="password" icon={Database} placeholder="At least 6 characters" formData={formData} setFormData={setFormData} errors={errors} /></div>
             </div>
           )}
 
@@ -355,3 +306,52 @@ export default function PublicRegistration() {
     </div>
   );
 }
+
+const DropzoneField = ({ field, label, files, onDrop }: { field: string, label: string, files: any, onDrop: any }) => {
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
+    onDrop: (acceptedFiles: File[]) => onDrop(acceptedFiles, field),
+    multiple: false,
+    accept: { 'image/*': ['.jpeg', '.jpg', '.png'], 'application/pdf': ['.pdf'] }
+  } as any);
+  return (
+    <div className="flex-1">
+      <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-2">{label}</label>
+      <div {...getRootProps()} className={`p-4 border-2 border-dashed rounded-2xl cursor-pointer transition-all h-32 flex flex-col items-center justify-center text-center ${isDragActive ? 'border-emerald-500 bg-emerald-50' : files[field] ? 'border-emerald-200 bg-emerald-50' : 'border-stone-200 bg-white hover:border-emerald-400'}`}>
+        <input {...getInputProps()} />
+        {files[field] ? (
+          <div className="flex flex-col items-center">
+            <CheckCircle className="text-emerald-500 mb-1" size={24} />
+            <p className="text-[10px] text-stone-600 truncate max-w-[100px]">{files[field]?.name}</p>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center text-stone-400">
+            <Upload className="mb-1" size={24} />
+            <p className="text-[10px] leading-tight font-bold">UPLOAD</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const InputField = ({ label, name, icon: Icon, type = "text", formData, setFormData, errors, ...props }: any) => (
+  <div className="space-y-2">
+    <label className="text-sm font-bold text-stone-700 block">{label}</label>
+    <div className="relative group">
+      {Icon && <Icon className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${errors[name] ? 'text-red-400' : 'text-stone-400 group-focus-within:text-emerald-500'}`} size={18} />}
+      <input 
+        type={type}
+        value={formData[name as keyof typeof formData]}
+        onChange={(e) => {
+          let val = e.target.value;
+          if (name === 'transaction_ref') val = val.toUpperCase();
+          setFormData({...formData, [name]: val});
+        }}
+        className={`w-full ${Icon ? 'pl-12' : 'pl-4'} pr-4 py-3.5 bg-stone-50 border-2 rounded-2xl outline-none transition-all ${errors[name] ? 'border-red-200 focus:border-red-500 bg-red-50' : 'border-stone-100 focus:border-emerald-500 bg-stone-50'}`}
+        {...props}
+      />
+      {errors[name] && <AlertCircle className="absolute right-4 top-1/2 -translate-y-1/2 text-red-500" size={18} />}
+    </div>
+    {errors[name] && <p className="text-red-500 text-[11px] font-semibold">{errors[name]}</p>}
+  </div>
+);

@@ -390,7 +390,11 @@ if (branchCount.count === 0) {
   db.prepare("INSERT INTO branches (name, location, contact) VALUES (?, ?, ?)").run("Adama Branch", "Adama, City Center", "+251221112233");
   
   const adminPassword = bcrypt.hashSync("admin123", 10);
-  db.prepare("INSERT INTO users (username, password, role, full_name) VALUES (?, ?, ?, ?)").run("admin", adminPassword, "superadmin", "System Administrator");
+  db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run("admin", adminPassword, "superadmin", "System Administrator", "admin@dreamland.edu");
+  
+  db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run("registrar", bcrypt.hashSync("registrar123", 10), "registrar", "Branch Registrar", "registrar@dreamland.edu");
+  db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run("accountant", bcrypt.hashSync("accountant123", 10), "accountant", "Senior Accountant", "accountant@dreamland.edu");
+  db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run("faculty", bcrypt.hashSync("faculty123", 10), "faculty", "Dr. Jane Smith", "faculty@dreamland.edu");
   
   db.prepare("INSERT INTO programs (name, code, duration_years, total_credits) VALUES (?, ?, ?, ?)").run("Computer Science", "CS", 4, 147);
   db.prepare("INSERT INTO programs (name, code, duration_years, total_credits) VALUES (?, ?, ?, ?)").run("Accounting & Finance", "ACC", 3, 110);
@@ -743,9 +747,15 @@ async function startServer() {
   // API Routes
   app.post("/api/auth/login", authLimiter, async (req, res) => {
     const { username, password, rememberMe } = req.body;
-    const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username) as any;
+    console.log(`[AUTH] Login attempt for username: ${username}`);
+    const user = db.prepare("SELECT * FROM users WHERE username = ? OR email = ?").get(username, username) as any;
+
+    if (!user) {
+      console.log(`[AUTH] User not found: ${username}`);
+    }
 
     if (user && await bcrypt.compare(password, user.password)) {
+      console.log(`[AUTH] Password match for user: ${username}`);
       // Check if account is locked (too many failed attempts)
       const failedAttempts = db.prepare("SELECT failed_login_attempts, locked_until FROM users WHERE id = ?").get(user.id) as any;
       if (failedAttempts?.locked_until && new Date(failedAttempts.locked_until) > new Date()) {
@@ -769,7 +779,7 @@ async function startServer() {
       });
     } else {
       // Increment failed login attempts
-      const failedUser = db.prepare("SELECT id, failed_login_attempts FROM users WHERE username = ?").get(username) as any;
+      const failedUser = db.prepare("SELECT id, failed_login_attempts FROM users WHERE username = ? OR email = ?").get(username, username) as any;
       if (failedUser) {
         const newAttempts = (failedUser.failed_login_attempts || 0) + 1;
         const lockUntil = newAttempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null; // Lock for 15 min after 5 attempts

@@ -319,6 +319,13 @@ INSERT INTO branches (name, location, contact) VALUES
 INSERT INTO users (username, password, role, full_name, email) VALUES 
 ('admin', '$2a$10$8K1p/j/S.A0Vv8B8lBvS.O9j3z7p4q3m1g5.5u5v5w5x5y5z5', 'superadmin', 'System Administrator', 'admin@dreamland.edu');
 
+-- Additional Demo Users (Passwords: user+123, e.g., registrar123)
+-- These use a placeholder hash for 'registrar123', 'accountant123', 'faculty123'
+INSERT INTO users (username, password, role, full_name, email) VALUES 
+('registrar', '$2a$10$8K1p/j/S.A0Vv8B8lBvS.O9j3z7p4q3m1g5.5u5v5w5x5y5z5', 'registrar', 'Branch Registrar', 'registrar@dreamland.edu'),
+('accountant', '$2a$10$8K1p/j/S.A0Vv8B8lBvS.O9j3z7p4q3m1g5.5u5v5w5x5y5z5', 'accountant', 'Senior Accountant', 'accountant@dreamland.edu'),
+('faculty', '$2a$10$8K1p/j/S.A0Vv8B8lBvS.O9j3z7p4q3m1g5.5u5v5w5x5y5z5', 'faculty', 'Dr. Jane Smith', 'faculty@dreamland.edu');
+
 -- Insert Programs
 INSERT INTO programs (name, code, duration_years, total_credits) VALUES 
 ('Computer Science', 'CS', 4, 147),
