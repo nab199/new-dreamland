@@ -11,7 +11,6 @@ import {
   Globe,
   Mail,
   Phone,
-  GraduationCap,
   Sparkles,
   CheckCircle2,
   Clock,
@@ -48,9 +47,11 @@ export default function LandingPage() {
       <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-stone-200/50">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-emerald-200 group-hover:scale-110 transition-transform duration-300">
-              <GraduationCap size={24} />
-            </div>
+            <img 
+              src="/images.jfif" 
+              alt="Dreamland College Logo" 
+              className="w-10 h-10 rounded-xl object-cover shadow-lg group-hover:scale-110 transition-transform duration-300"
+            />
             <div className="flex flex-col">
               <span className="text-xl font-black tracking-tight text-stone-900 leading-none">DREAMLAND</span>
               <span className="text-[10px] font-black tracking-[0.2em] text-emerald-600 uppercase mt-1">College</span>
@@ -243,9 +244,11 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-4 gap-12">
           <div className="space-y-6">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center text-white">
-                <GraduationCap size={20} />
-              </div>
+              <img 
+                src="/images.jfif" 
+                alt="Dreamland College Logo" 
+                className="w-8 h-8 rounded-lg object-cover"
+              />
               <span className="text-lg font-black tracking-tight text-white">DREAMLAND</span>
             </div>
             <p className="text-sm leading-relaxed">
