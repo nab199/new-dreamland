@@ -147,8 +147,9 @@ export default function PublicRegistration() {
   const nextStep = () => {
     if (!validateStep(step)) return;
     if (step === 1) {
-      if (!isPhoneVerified) { handleSendOTP('phone'); return; }
       if (!isEmailVerified) { handleSendOTP('email'); return; }
+      // Optional: Keep phone verification if desired, but prioritize email
+      // if (!isPhoneVerified) { handleSendOTP('phone'); return; }
     }
     setStep(prev => prev + 1);
   };
