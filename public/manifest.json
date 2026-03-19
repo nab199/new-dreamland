@@ -1,0 +1,37 @@
+{
+  "name": "Dreamland College Management System",
+  "short_name": "Dreamland",
+  "description": "College management system for students, faculty, and administration",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f5f4",
+  "theme_color": "#059669",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/images.jfif",
+      "sizes": "192x192",
+      "type": "image/jfif",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images.jfif",
+      "sizes": "512x512",
+      "type": "image/jfif",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["education", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/dashboard",
+      "description": "View your dashboard"
+    },
+    {
+      "name": "Login",
+      "url": "/login",
+      "description": "Login to your account"
+    }
+  ]
+}

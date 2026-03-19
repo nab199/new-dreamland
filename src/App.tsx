@@ -10,6 +10,7 @@ import PublicRegistration from './pages/PublicRegistration';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import ProfileSettings from './components/ProfileSettings';
+import OfflineIndicator from './components/OfflineIndicator';
 import './i18n';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -58,6 +59,8 @@ export default function App() {
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
+          {/* Offline indicator shown on all pages */}
+          <OfflineIndicator position="top" showDetails={false} />
         </BrowserRouter>
       </ToastProvider>
     </AuthProvider>
