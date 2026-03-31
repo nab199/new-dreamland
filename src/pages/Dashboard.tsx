@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { useTranslation } from 'react-i18next';
 import {
   Users,
@@ -19,15 +20,24 @@ import {
   MapPin,
   Settings,
   ShieldCheck,
+  Shield,
   Check,
+  CheckCheck,
   FileText,
   Download,
+  X,
   Brain,
   BarChart3,
   Database,
   UserCheck,
   Activity,
-  GraduationCap
+  GraduationCap,
+  FileSpreadsheet,
+  Save,
+  Calculator,
+  TrendingUp,
+  AlertCircle,
+  Calendar
 } from 'lucide-react';
 import axios from 'axios';
 import { motion } from 'framer-motion';
@@ -39,9 +49,21 @@ import AnalyticsDashboard from '../components/AnalyticsDashboard';
 import BackupManagement from '../components/BackupManagement';
 import AdminStatusDashboard from '../components/AdminStatusDashboard';
 import FloatingAI from '../components/FloatingAI';
+import CBEReceiptUpload from '../components/CBEReceiptUpload';
+import GradeEntry from '../components/GradeEntry';
+import CourseResources from '../components/CourseResources';
+import ScheduleManagement from '../components/ScheduleManagement';
+import RegistrationPeriodManager from '../components/RegistrationPeriodManager';
+import CreditHourManager from '../components/CreditHourManager';
+import StudentCourseRegistration from '../components/StudentCourseRegistration';
+import UserManagement from '../components/UserManagement';
+import IntegrationSettings from '../components/IntegrationSettings';
+import SemesterRegistration from '../components/SemesterRegistration';
+import RegistrationManagement from '../components/RegistrationManagement';
 
 export default function Dashboard() {
   const { user, logout, token } = useAuth();
+  const { showToast } = useToast();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
@@ -54,11 +76,21 @@ export default function Dashboard() {
   const [attendance, setAttendance] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [facultyCourses, setFacultyCourses] = useState<any[]>([]);
+  const [myCoursesWithInstructors, setMyCoursesWithInstructors] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [integrations, setIntegrations] = useState<any>(null);
   const [regStatus, setRegStatus] = useState<{ isOpen: boolean, period: any } | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchData = async () => {
+    if (!token) {
+      console.error('No token available');
+      setIsLoading(false);
+      return;
+    }
+    
+    console.log('Fetching data with role:', user?.role, 'token:', token ? 'present' : 'missing');
+    
     try {
       const headers = { Authorization: `Bearer ${token}` };
 
@@ -84,6 +116,7 @@ export default function Dashboard() {
       let scheduleRes = Promise.resolve({ data: [] });
       let attendanceRes = Promise.resolve({ data: [] });
       let invoicesRes = Promise.resolve({ data: [] });
+      let myCoursesRes = Promise.resolve({ data: [] });
 
       if (user?.role === 'student') {
         enrollmentsRes = axios.get('/api/enrollments', { headers });
@@ -92,6 +125,7 @@ export default function Dashboard() {
         scheduleRes = axios.get('/api/my-schedule', { headers });
         attendanceRes = axios.get('/api/my-attendance', { headers });
         invoicesRes = axios.get('/api/my-invoices', { headers });
+        myCoursesRes = axios.get('/api/my-courses', { headers });
       }
 
       // Faculty-specific data
@@ -110,7 +144,8 @@ export default function Dashboard() {
         schedule,
         attendance,
         invoices,
-        facultyCourses
+        facultyCourses,
+        myCoursesWithInstructors
       ] = await Promise.all([
         studentsRes,
         branchesRes,
@@ -122,7 +157,8 @@ export default function Dashboard() {
         scheduleRes,
         attendanceRes,
         invoicesRes,
-        facultyCoursesRes
+        facultyCoursesRes,
+        myCoursesRes
       ]);
 
       setStudents(students.data);
@@ -136,6 +172,7 @@ export default function Dashboard() {
       setAttendance(attendance.data);
       setInvoices(invoices.data);
       setFacultyCourses(facultyCourses.data);
+      setMyCoursesWithInstructors(myCoursesWithInstructors.data);
     } catch (err) {
       console.error('Failed to fetch dashboard data', err);
     } finally {
@@ -152,16 +189,23 @@ export default function Dashboard() {
     { id: 'students', icon: Users, label: t('students'), roles: ['superadmin', 'branch_admin', 'faculty', 'accountant', 'registrar'] },
     { id: 'branches', icon: Building2, label: t('branches'), roles: ['superadmin', 'branch_admin'] },
     { id: 'academics', icon: BookOpen, label: t('academics'), roles: ['superadmin', 'branch_admin', 'faculty', 'student', 'registrar'] },
+    { id: 'registration-periods', icon: Calendar, label: 'Registration Periods', roles: ['superadmin', 'branch_admin', 'registrar'] },
+    { id: 'credit-hours', icon: CreditCard, label: 'Credit Hours', roles: ['superadmin', 'branch_admin', 'registrar'] },
     { id: 'registration', icon: Plus, label: 'Course Registration', roles: ['student'] },
+    { id: 'my-courses', icon: BookOpen, label: 'My Courses & Instructors', roles: ['student'] },
     { id: 'my-classes', icon: Users, label: 'My Classes', roles: ['faculty'] },
+    { id: 'grades', icon: FileSpreadsheet, label: 'Grade Entry', roles: ['faculty'] },
     { id: 'resources', icon: BookOpen, label: 'Resources', roles: ['student', 'faculty'] },
-    { id: 'schedule', icon: Bell, label: 'My Schedule', roles: ['student', 'faculty'] },
+    { id: 'schedule', icon: Bell, label: 'Schedule', roles: ['superadmin', 'branch_admin', 'student', 'faculty'] },
     { id: 'attendance', icon: ShieldCheck, label: 'Attendance', roles: ['student', 'faculty'] },
     { id: 'finance', icon: CreditCard, label: t('finance'), roles: ['superadmin', 'branch_admin', 'accountant', 'student', 'registrar'] },
+    { id: 'payment-verification', icon: FileText, label: 'Verify Payment', roles: ['student'] },
     { id: 'registrar', icon: User, label: 'Registrar', roles: ['superadmin', 'registrar'] },
+    { id: 'semester-registrations', icon: Calendar, label: 'Semester Regs', roles: ['superadmin', 'branch_admin', 'registrar'] },
+    { id: 'user-management', icon: Shield, label: 'User Management', roles: ['superadmin', 'branch_admin'] },
     { id: 'integrations', icon: Settings, label: 'Integrations', roles: ['superadmin'] },
     { id: 'system-status', icon: Activity, label: 'System Health', roles: ['superadmin'] },
-    { id: 'ai-features', icon: Brain, label: 'AI Tools', roles: ['superadmin', 'branch_admin', 'faculty', 'student'] },
+    { id: 'ai-features', icon: Brain, label: 'AI Tools', roles: ['superadmin', 'branch_admin', 'faculty'] },
     { id: 'analytics', icon: BarChart3, label: 'Analytics', roles: ['superadmin', 'branch_admin', 'accountant'] },
     { id: 'parent-portal', icon: UserCheck, label: 'Parent Portal', roles: ['parent'] },
     { id: 'backup', icon: Database, label: 'Backup & GDPR', roles: ['superadmin'] },
@@ -173,6 +217,37 @@ export default function Dashboard() {
   const [materials, setMaterials] = useState<any[]>([]);
   const [studentAssignments, setStudentAssignments] = useState<any[]>([]);
   const [facultyStudents, setFacultyStudents] = useState<any[]>([]);
+  const [financeTab, setFinanceTab] = useState<'verify' | 'fee' | 'invoice'>('verify');
+  const [integrationTab, setIntegrationTab] = useState<string | null>(null);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [filterOptions, setFilterOptions] = useState({
+    branch: '',
+    program: '',
+    status: '',
+    studentType: ''
+  });
+
+  useEffect(() => {
+    const fetchUnreadCount = async () => {
+      try {
+        const headers = { Authorization: `Bearer ${token}` };
+        const res = await axios.get('/api/notifications', { headers });
+        setUnreadCount(res.data.unreadCount || 0);
+      } catch (err) {
+        console.error('Failed to fetch unread count', err);
+      }
+    };
+
+    if (token) {
+      fetchUnreadCount();
+      // Polling for new notifications every 30 seconds
+      const interval = setInterval(fetchUnreadCount, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [token]);
 
   const fetchOfferingData = async (offeringId: number) => {
     try {
@@ -196,6 +271,153 @@ export default function Dashboard() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleViewAllStudents = () => {
+    setActiveTab('students');
+  };
+
+  const handleViewCourseStudents = async (offeringId: number) => {
+    setSelectedOffering(offeringId);
+    await fetchOfferingData(offeringId);
+    await fetchFacultyStudents(offeringId);
+  };
+
+  const handleTakeAttendance = async (course: any) => {
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      await axios.post(`/api/attendance/take`, { course_offering_id: course.id }, { headers });
+      showToast('Attendance recorded successfully!', 'success');
+    } catch (err) {
+      console.error('Failed to record attendance', err);
+      showToast('Failed to record attendance. Please try again.', 'error');
+    }
+  };
+
+  const handleUploadMaterials = (course: any) => {
+    setSelectedOffering(course.id);
+    setActiveTab('resources');
+  };
+
+  const handleAddAssignment = (course: any) => {
+    const assignmentTitle = prompt('Enter assignment title:');
+    if (!assignmentTitle) return;
+    const dueDate = prompt('Enter due date (YYYY-MM-DD):');
+    if (!dueDate) return;
+    
+    axios.post(`/api/courses/${course.id}/assignments`, {
+      title: assignmentTitle,
+      due_date: dueDate
+    }, { headers: { Authorization: `Bearer ${token}` } })
+      .then(() => showToast('Assignment added successfully!', 'success'))
+      .catch(() => showToast('Failed to add assignment', 'error'));
+  };
+
+  const handleManageBranch = (branch: any) => {
+    setActiveTab('students');
+  };
+
+  const handleViewAcademics = (type: string) => {
+    setActiveTab('academics');
+  };
+
+  const handleManageFeeStructure = () => {
+    setActiveTab('credit-hours');
+  };
+
+  const handleGenerateInvoice = () => {
+    setActiveTab('payments');
+  };
+
+  const handleConfigureIntegration = (integration: string) => {
+    setIntegrationTab(integration);
+    showToast(`${integration} configuration coming soon`, 'info');
+  };
+
+  const handleRegistrarAction = (action: string) => {
+    if (action === 'schedule') setActiveTab('schedule');
+    else if (action === 'registration') setActiveTab('registration');
+    else setActiveTab('students');
+  };
+
+  const handleSearch = (query: string) => {
+    // Filter students based on search query
+    if (query.trim() === '') {
+      return;
+    }
+    const lowerQuery = query.toLowerCase();
+    const filtered = students.filter(s => 
+      s.full_name?.toLowerCase().includes(lowerQuery) ||
+      s.student_id_code?.toLowerCase().includes(lowerQuery) ||
+      s.email?.toLowerCase().includes(lowerQuery)
+    );
+    console.log('Search results:', filtered);
+    // Could set a filtered state or navigate to students tab with filter
+  };
+
+  const handleOpenNotifications = async () => {
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const res = await axios.get('/api/notifications', { headers });
+      setNotifications(res.data.notifications || []);
+      setUnreadCount(res.data.unreadCount || 0);
+      setShowNotifications(true);
+    } catch (err) {
+      console.error('Failed to fetch notifications', err);
+      // Show mock notifications for demo
+      setNotifications([
+        { id: 1, title: 'Welcome', message: 'Welcome to Dreamland College!', is_read: 0, created_at: new Date().toISOString() },
+        { id: 2, title: 'System Update', message: 'New features available', is_read: 0, created_at: new Date().toISOString() }
+      ]);
+      setShowNotifications(true);
+    }
+  };
+
+  const handleMarkNotificationRead = async (id: number) => {
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      await axios.post('/api/notifications/read', { notification_id: id }, { headers });
+      setNotifications(notifications.map(n => n.id === id ? { ...n, is_read: 1 } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (err) {
+      console.error('Failed to mark notification as read', err);
+    }
+  };
+
+  const handleOpenFilters = () => {
+    setShowFilters(!showFilters);
+  };
+
+  const handleApplyFilters = () => {
+    // Filter students based on selected options
+    let filtered = [...students];
+    
+    if (filterOptions.branch) {
+      filtered = filtered.filter(s => s.branch_id?.toString() === filterOptions.branch);
+    }
+    if (filterOptions.program) {
+      filtered = filtered.filter(s => s.program_id?.toString() === filterOptions.program);
+    }
+    if (filterOptions.status) {
+      filtered = filtered.filter(s => s.status === filterOptions.status);
+    }
+    if (filterOptions.studentType) {
+      filtered = filtered.filter(s => s.student_type === filterOptions.studentType);
+    }
+    
+    console.log('Filtered students:', filtered);
+    showToast(`Showing ${filtered.length} students`, 'info');
+    setShowFilters(false);
+  };
+
+  const handleClearFilters = () => {
+    setFilterOptions({ branch: '', program: '', status: '', studentType: '' });
+    showToast('Filters cleared', 'info');
+  };
+
+  const handleViewStudentDetails = (student: any) => {
+    setSelectedStudent(student);
+    setIsEditModalOpen(true);
   };
 
   const SidebarItem = ({ id, icon: Icon, label }: any) => (
@@ -254,7 +476,7 @@ export default function Dashboard() {
             </div>
           </div>
           <button 
-            onClick={logout}
+            onClick={() => logout('user_initiated')}
             className="w-full flex items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 rounded-2xl transition-all font-semibold text-sm"
           >
             <LogOut size={20} />
@@ -278,102 +500,336 @@ export default function Dashboard() {
               <input 
                 type="text" 
                 placeholder="Search anything..." 
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  handleSearch(e.target.value);
+                }}
                 className="pl-12 pr-4 py-2.5 bg-white border border-stone-200 rounded-2xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none w-64 transition-all"
               />
             </div>
-            <button className="p-2.5 bg-white border border-stone-200 rounded-2xl text-stone-600 hover:bg-stone-50 transition-all relative">
+            <button 
+              onClick={handleOpenNotifications}
+              className="p-2.5 bg-white border border-stone-200 rounded-2xl text-stone-600 hover:bg-stone-50 transition-all relative"
+            >
               <Bell size={20} />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
+              {unreadCount > 0 && (
+                <span className="absolute top-2 right-2 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white font-bold">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
             </button>
           </div>
         </header>
 
         {activeTab === 'overview' && (
           <div className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[
-                { label: 'Total Students', value: students.length, icon: Users, color: 'bg-blue-500' },
-                { label: 'Active Branches', value: branches.length, icon: Building2, color: 'bg-emerald-500' },
-                { label: 'Programs', value: '12', icon: BookOpen, color: 'bg-purple-500' },
-                { label: 'Revenue (ETB)', value: '1.2M', icon: CreditCard, color: 'bg-orange-500' }
-              ].map((stat, i) => (
-                <motion.div 
-                  key={i}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.1 }}
-                  className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"
-                >
-                  <div className={`w-12 h-12 ${stat.color} rounded-2xl flex items-center justify-center text-white mb-4 shadow-lg shadow-stone-100`}>
-                    <stat.icon size={24} />
-                  </div>
-                  <p className="text-sm font-medium text-stone-500">{stat.label}</p>
-                  <h3 className="text-2xl font-bold text-stone-900 mt-1">{stat.value}</h3>
-                </motion.div>
-              ))}
-            </div>
+            {/* Superadmin & Branch Admin Overview */}
+            {(user?.role === 'superadmin' || user?.role === 'branch_admin') && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  {[
+                    { label: 'Total Students', value: students.length, icon: Users, color: 'bg-blue-500' },
+                    { label: 'Active Branches', value: branches.length, icon: Building2, color: 'bg-emerald-500' },
+                    { label: 'Programs', value: '12', icon: BookOpen, color: 'bg-purple-500' },
+                    { label: 'Revenue (ETB)', value: '1.2M', icon: CreditCard, color: 'bg-orange-500' }
+                  ].map((stat, i) => (
+                    <motion.div 
+                      key={i}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.1 }}
+                      className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"
+                    >
+                      <div className={`w-12 h-12 ${stat.color} rounded-2xl flex items-center justify-center text-white mb-4 shadow-lg shadow-stone-100`}>
+                        <stat.icon size={24} />
+                      </div>
+                      <p className="text-sm font-medium text-stone-500">{stat.label}</p>
+                      <h3 className="text-2xl font-bold text-stone-900 mt-1">{stat.value}</h3>
+                    </motion.div>
+                  ))}
+                </div>
 
-            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden">
-              <div className="p-6 border-b border-stone-100 flex justify-between items-center">
-                <h3 className="font-bold text-stone-900">Recent Students</h3>
-                <button className="text-sm font-bold text-emerald-600 hover:text-emerald-700">View All</button>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="bg-stone-50/50 text-stone-500 text-xs uppercase tracking-wider">
-                      <th className="px-6 py-4 font-semibold">Student Name</th>
-                      <th className="px-6 py-4 font-semibold">ID Code</th>
-                      <th className="px-6 py-4 font-semibold">Branch</th>
-                      <th className="px-6 py-4 font-semibold">Program</th>
-                      <th className="px-6 py-4 font-semibold">Status</th>
-                      <th className="px-6 py-4 font-semibold"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100">
-                    {students.slice(0, 5).map((student, i) => (
-                      <tr key={i} className="hover:bg-stone-50 transition-colors group">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-stone-100 rounded-full flex items-center justify-center text-stone-600 text-xs font-bold">
-                              {student.full_name?.[0]}
-                            </div>
-                            <span className="text-sm font-semibold text-stone-900">{student.full_name}</span>
+                <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-stone-100 flex justify-between items-center">
+                    <h3 className="font-bold text-stone-900">Recent Students</h3>
+                    <button onClick={handleViewAllStudents} className="text-sm font-bold text-emerald-600 hover:text-emerald-700">View All</button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-stone-50/50 text-stone-500 text-xs uppercase tracking-wider">
+                          <th className="px-6 py-4 font-semibold">Student Name</th>
+                          <th className="px-6 py-4 font-semibold">ID Code</th>
+                          <th className="px-6 py-4 font-semibold">Branch</th>
+                          <th className="px-6 py-4 font-semibold">Program</th>
+                          <th className="px-6 py-4 font-semibold">Status</th>
+                          <th className="px-6 py-4 font-semibold"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {students.slice(0, 5).map((student, i) => (
+                          <tr key={i} className="hover:bg-stone-50 transition-colors group">
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-stone-100 rounded-full flex items-center justify-center text-stone-600 text-xs font-bold">
+                                  {student.full_name?.[0]}
+                                </div>
+                                <span className="text-sm font-semibold text-stone-900">{student.full_name}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-stone-600 font-mono">{student.student_id_code || 'PENDING'}</td>
+                            <td className="px-6 py-4 text-sm text-stone-600">{student.branch_name}</td>
+                            <td className="px-6 py-4 text-sm text-stone-600">
+                              {student.program_name} 
+                              {student.program_degree && <span className="text-[10px] ml-1 px-1.5 py-0.5 bg-stone-100 rounded text-stone-500 font-bold uppercase">{student.program_degree}</span>}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                                student.academic_status === 'good_standing' 
+                                  ? 'bg-emerald-50 text-emerald-600' 
+                                  : 'bg-red-50 text-red-600'
+                              }`}>
+                                {student.academic_status?.replace('_', ' ')}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <button onClick={() => handleViewStudentDetails(student)} className="p-1.5 text-stone-400 hover:text-stone-600 transition-colors">
+                                <MoreVertical size={18} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {students.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="px-6 py-10 text-center text-stone-500 text-sm">
+                              No students found.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Student Overview */}
+            {user?.role === 'student' && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-blue-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <BookOpen size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Enrolled Courses</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">{enrollments.length}</h3>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <CreditCard size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Pending Payments</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">{invoices.filter(i => i.status === 'pending').length}</h3>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-purple-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <ShieldCheck size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Attendance Rate</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">95%</h3>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+                  <h3 className="font-bold text-stone-900 mb-4">My Enrolled Courses</h3>
+                  {enrollments.length > 0 ? (
+                    <div className="space-y-3">
+                      {enrollments.map((enrollment: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between p-4 bg-stone-50 rounded-2xl">
+                          <div>
+                            <p className="font-semibold text-stone-900">{enrollment.course_name}</p>
+                            <p className="text-sm text-stone-500">{enrollment.program_name}</p>
                           </div>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-stone-600 font-mono">{student.student_id_code || 'PENDING'}</td>
-                        <td className="px-6 py-4 text-sm text-stone-600">{student.branch_name}</td>
-                        <td className="px-6 py-4 text-sm text-stone-600">
-                          {student.program_name} 
-                          {student.program_degree && <span className="text-[10px] ml-1 px-1.5 py-0.5 bg-stone-100 rounded text-stone-500 font-bold uppercase">{student.program_degree}</span>}
-                        </td>
-                        <td className="px-6 py-4">
                           <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                            student.academic_status === 'good_standing' 
-                              ? 'bg-emerald-50 text-emerald-600' 
-                              : 'bg-red-50 text-red-600'
+                            enrollment.status === 'active' ? 'bg-emerald-50 text-emerald-600' : 'bg-stone-100 text-stone-500'
                           }`}>
-                            {student.academic_status.replace('_', ' ')}
+                            {enrollment.status}
                           </span>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <button className="p-1.5 text-stone-400 hover:text-stone-600 transition-colors">
-                            <MoreVertical size={18} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {students.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="px-6 py-10 text-center text-stone-500 text-sm">
-                          No students found.
-                        </td>
-                      </tr>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-stone-500 text-center py-4">No enrolled courses yet.</p>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+                  <h3 className="font-bold text-stone-900 mb-4">My Upcoming Schedule</h3>
+                  {schedule.length > 0 ? (
+                    <div className="space-y-3">
+                      {schedule.slice(0, 5).map((s: any, i: number) => (
+                        <div key={i} className="flex items-center gap-4 p-4 bg-stone-50 rounded-2xl">
+                          <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 font-bold">
+                            {new Date(s.start_time).toLocaleDateString('en-US', { weekday: 'short' })}
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-semibold text-stone-900">{s.course_name}</p>
+                            <p className="text-sm text-stone-500">{s.room_name} • {new Date(s.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-stone-500 text-center py-4">No upcoming classes.</p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Faculty Overview */}
+            {user?.role === 'faculty' && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-blue-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <BookOpen size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">My Courses</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">{facultyCourses.length}</h3>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <Users size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Total Students</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">{facultyCourses.reduce((acc: number, c: any) => acc + (c.enrolled_count || 0), 0)}</h3>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-purple-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <Bell size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Pending Assignments</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">3</h3>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+                  <h3 className="font-bold text-stone-900 mb-4">My Courses</h3>
+                  {facultyCourses.length > 0 ? (
+                    <div className="space-y-3">
+                      {facultyCourses.map((course: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between p-4 bg-stone-50 rounded-2xl">
+                          <div>
+                            <p className="font-semibold text-stone-900">{course.course_name}</p>
+                            <p className="text-sm text-stone-500">{course.program_name} - {course.year} {course.semester}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-stone-500">{course.enrolled_count || 0} students</span>
+                            <button 
+                              onClick={() => { setActiveTab('my-classes'); }}
+                              className="px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                            >
+                              View
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-stone-500 text-center py-4">No courses assigned yet.</p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Accountant Overview */}
+            {user?.role === 'accountant' && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-blue-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <CreditCard size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Total Payments</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">45</h3>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <CreditCard size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Verified</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">38</h3>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <CreditCard size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Pending</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">7</h3>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+                  <h3 className="font-bold text-stone-900 mb-4">Recent Payments</h3>
+                  <div className="space-y-3">
+                    {invoices.length > 0 ? invoices.slice(0, 5).map((invoice: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between p-4 bg-stone-50 rounded-2xl">
+                        <div>
+                          <p className="font-semibold text-stone-900">{invoice.student_name || 'Student'}</p>
+                          <p className="text-sm text-stone-500">{invoice.description || 'Payment'}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-stone-900">{invoice.amount} ETB</p>
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            invoice.status === 'verified' ? 'bg-emerald-50 text-emerald-600' : 
+                            invoice.status === 'pending' ? 'bg-orange-50 text-orange-600' : 'bg-red-50 text-red-600'
+                          }`}>
+                            {invoice.status}
+                          </span>
+                        </div>
+                      </div>
+                    )) : (
+                      <p className="text-stone-500 text-center py-4">No payments found.</p>
                     )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Registrar Overview */}
+            {user?.role === 'registrar' && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-blue-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <Users size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Total Students</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">{students.length}</h3>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <BookOpen size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Active Programs</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">12</h3>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+                    <div className="w-12 h-12 bg-purple-500 rounded-2xl flex items-center justify-center text-white mb-4">
+                      <CreditCard size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-500">Enrollments</p>
+                    <h3 className="text-2xl font-bold text-stone-900 mt-1">{students.filter(s => s.enrollment_status === 'active').length}</h3>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+                  <h3 className="font-bold text-stone-900 mb-4">Student Records</h3>
+                  <p className="text-stone-500">Use the Students tab to manage student records, registrations, and transcripts.</p>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -382,6 +838,15 @@ export default function Dashboard() {
         {activeTab === 'analytics' && <AnalyticsDashboard />}
         {activeTab === 'parent-portal' && <ParentPortal />}
         {activeTab === 'backup' && <BackupManagement />}
+        {activeTab === 'payment-verification' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold text-stone-900 mb-2">Verify Your Payment</h2>
+              <p className="text-stone-600">Upload your CBE payment receipt to verify your payment</p>
+            </div>
+            <CBEReceiptUpload expectedAmount={invoices.length > 0 ? invoices[0]?.amount : undefined} />
+          </div>
+        )}
 
         {activeTab === 'students' && (
           <div className="space-y-6">
@@ -484,12 +949,456 @@ export default function Dashboard() {
                     {branch.contact}
                   </div>
                 </div>
-                <button className="w-full mt-8 py-3 bg-stone-50 text-stone-600 rounded-2xl text-sm font-bold hover:bg-emerald-600 hover:text-white transition-all">
+                <button onClick={() => handleManageBranch(branch)} className="w-full mt-8 py-3 bg-stone-50 text-stone-600 rounded-2xl text-sm font-bold hover:bg-emerald-600 hover:text-white transition-all">
                   Manage Branch
                 </button>
               </div>
             ))}
           </div>
+        )}
+
+        {activeTab === 'my-classes' && user?.role === 'faculty' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+              <h3 className="text-xl font-bold text-stone-900 mb-6">My Teaching Schedule</h3>
+              {facultyCourses.length > 0 ? (
+                <div className="space-y-4">
+                  {facultyCourses.map((course: any, i: number) => (
+                    <div key={i} className="border border-stone-200 rounded-2xl p-6 hover:border-emerald-200 transition-all">
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <h4 className="text-lg font-bold text-stone-900">{course.course_name}</h4>
+                          <p className="text-sm text-stone-500">{course.program_name} - Year {course.year}, Semester {course.semester}</p>
+                        </div>
+                        <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-xs font-bold rounded-full">
+                          {course.enrolled_count || 0} Students
+                        </span>
+                      </div>
+                      <div className="flex gap-3">
+                        <button 
+                          onClick={() => handleViewCourseStudents(course.id)}
+                          className="px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700"
+                        >
+                          View Students
+                        </button>
+                        <button 
+                          onClick={() => handleUploadMaterials(course)}
+                          className="px-4 py-2 bg-stone-100 text-stone-600 text-sm font-bold rounded-xl hover:bg-stone-200"
+                        >
+                          Upload Materials
+                        </button>
+                        <button 
+                          onClick={() => handleAddAssignment(course)}
+                          className="px-4 py-2 bg-stone-100 text-stone-600 text-sm font-bold rounded-xl hover:bg-stone-200"
+                        >
+                          Add Assignment
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-stone-500 text-center py-8">No courses assigned yet.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'resources' && (
+          <CourseResources facultyCourses={facultyCourses} enrollments={enrollments} />
+        )}
+
+        {activeTab === 'grades' && user?.role === 'faculty' && (
+          <GradeEntry facultyCourses={facultyCourses} />
+        )}
+
+        {activeTab === 'schedule' && (
+          <ScheduleManagement facultyCourses={facultyCourses} schedule={schedule} branches={branches} />
+        )}
+
+        {activeTab === 'attendance' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+              <h3 className="text-xl font-bold text-stone-900 mb-6">
+                {user?.role === 'faculty' ? 'Attendance Management' : 'My Attendance Record'}
+              </h3>
+              
+              {user?.role === 'student' && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div className="bg-emerald-50 p-6 rounded-2xl text-center">
+                      <p className="text-3xl font-bold text-emerald-600">95%</p>
+                      <p className="text-sm text-emerald-700 font-medium mt-1">Overall Attendance</p>
+                    </div>
+                    <div className="bg-blue-50 p-6 rounded-2xl text-center">
+                      <p className="text-3xl font-bold text-blue-600">{attendance.filter(a => a.status === 'present').length}</p>
+                      <p className="text-sm text-blue-700 font-medium mt-1">Present</p>
+                    </div>
+                    <div className="bg-red-50 p-6 rounded-2xl text-center">
+                      <p className="text-3xl font-bold text-red-600">{attendance.filter(a => a.status === 'absent').length}</p>
+                      <p className="text-sm text-red-700 font-medium mt-1">Absent</p>
+                    </div>
+                  </div>
+                  
+                  {attendance.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead>
+                          <tr className="bg-stone-50 text-stone-500 text-xs uppercase">
+                            <th className="px-4 py-3">Date</th>
+                            <th className="px-4 py-3">Course</th>
+                            <th className="px-4 py-3">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-stone-100">
+                          {attendance.map((a: any, i: number) => (
+                            <tr key={i} className="hover:bg-stone-50">
+                              <td className="px-4 py-3 text-sm">{new Date(a.date).toLocaleDateString()}</td>
+                              <td className="px-4 py-3 text-sm">{a.course_name}</td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                                  a.status === 'present' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'
+                                }`}>
+                                  {a.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-stone-500 text-center py-4">No attendance records.</p>
+                  )}
+                </>
+              )}
+
+              {user?.role === 'faculty' && (
+                <div className="space-y-4">
+                  <p className="text-stone-600 mb-4">Select a course to take attendance:</p>
+                  {facultyCourses.map((course: any, i: number) => (
+                    <div key={i} className="border border-stone-200 rounded-2xl p-4 flex justify-between items-center">
+                      <div>
+                        <h4 className="font-bold text-stone-900">{course.course_name}</h4>
+                        <p className="text-sm text-stone-500">{course.enrolled_count || 0} students enrolled</p>
+                      </div>
+                      <button onClick={() => handleTakeAttendance(course)} className="px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700">
+                        Take Attendance
+                      </button>
+                    </div>
+                  ))}
+                  {facultyCourses.length === 0 && (
+                    <p className="text-stone-500 text-center py-4">No courses assigned.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'academics' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+              <h3 className="text-xl font-bold text-stone-900 mb-6">Academic Management</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div onClick={() => handleViewAcademics('Courses')} className="border border-stone-200 rounded-2xl p-6 text-center hover:border-emerald-200 transition-all cursor-pointer">
+                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 mx-auto mb-4">
+                    <BookOpen size={24} />
+                  </div>
+                  <h4 className="font-bold text-stone-900">Courses</h4>
+                  <p className="text-sm text-stone-500">Manage courses</p>
+                </div>
+                <div onClick={() => handleViewAcademics('Programs')} className="border border-stone-200 rounded-2xl p-6 text-center hover:border-emerald-200 transition-all cursor-pointer">
+                  <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 mx-auto mb-4">
+                    <Users size={24} />
+                  </div>
+                  <h4 className="font-bold text-stone-900">Programs</h4>
+                  <p className="text-sm text-stone-500">Academic programs</p>
+                </div>
+                <div onClick={() => handleViewAcademics('Calendar')} className="border border-stone-200 rounded-2xl p-6 text-center hover:border-emerald-200 transition-all cursor-pointer">
+                  <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center text-purple-600 mx-auto mb-4">
+                    <Bell size={24} />
+                  </div>
+                  <h4 className="font-bold text-stone-900">Calendar</h4>
+                  <p className="text-sm text-stone-500">Academic calendar</p>
+                </div>
+                <div onClick={() => handleViewAcademics('Semesters')} className="border border-stone-200 rounded-2xl p-6 text-center hover:border-emerald-200 transition-all cursor-pointer">
+                  <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center text-orange-600 mx-auto mb-4">
+                    <CreditCard size={24} />
+                  </div>
+                  <h4 className="font-bold text-stone-900">Semesters</h4>
+                  <p className="text-sm text-stone-500">Semester management</p>
+                </div>
+              </div>
+
+              {calendars.length > 0 && (
+                <div className="mt-8">
+                  <h4 className="font-bold text-stone-900 mb-4">Upcoming Academic Events</h4>
+                  <div className="space-y-3">
+                    {calendars.slice(0, 5).map((event: any, i: number) => (
+                      <div key={i} className="flex items-center gap-4 p-4 bg-stone-50 rounded-2xl">
+                        <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 font-bold text-sm">
+                          {new Date(event.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </div>
+                        <div>
+                          <h5 className="font-bold text-stone-900">{event.title}</h5>
+                          <p className="text-sm text-stone-500">{event.type}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'registration' && user?.role === 'student' && (
+          <SemesterRegistration onRegistered={() => {
+            // After semester registration, show course registration
+            setTimeout(() => setActiveTab('registration'), 2000);
+          }} />
+        )}
+
+        {activeTab === 'my-courses' && user?.role === 'student' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+              <h3 className="text-xl font-bold text-stone-900 mb-2">My Courses & Instructors</h3>
+              <p className="text-stone-500 text-sm mb-6">View your enrolled courses and their instructors</p>
+              
+              {myCoursesWithInstructors.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {myCoursesWithInstructors.map((course: any, i: number) => (
+                    <div key={i} className="border border-stone-200 rounded-2xl p-6 hover:border-emerald-200 transition-all">
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <h4 className="text-lg font-bold text-stone-900">{course.course_title}</h4>
+                          <p className="text-sm text-stone-500 font-mono">{course.course_code}</p>
+                        </div>
+                        <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-xs font-bold rounded-full">
+                          {course.credits} Credits
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl">
+                          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
+                            {course.instructor_name ? course.instructor_name[0] : '?'}
+                          </div>
+                          <div>
+                            <p className="text-xs text-stone-500 font-bold uppercase">Instructor</p>
+                            <p className="text-sm font-semibold text-stone-900">
+                              {course.instructor_name || 'Not assigned'}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {course.instructor_email && (
+                          <p className="text-xs text-stone-500">{course.instructor_email}</p>
+                        )}
+                        
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-stone-500">{course.semester_name} - {course.academic_year}</span>
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${
+                            course.enrollment_status === 'enrolled' 
+                              ? 'bg-emerald-50 text-emerald-600' 
+                              : 'bg-stone-100 text-stone-500'
+                          }`}>
+                            {course.enrollment_status}
+                          </span>
+                        </div>
+                        
+                        {course.grade && (
+                          <div className="mt-3 pt-3 border-t border-stone-100">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm text-stone-500">Grade</span>
+                              <span className="text-lg font-bold text-emerald-600">{course.grade}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-10">
+                  <BookOpen size={48} className="text-stone-300 mx-auto mb-4" />
+                  <p className="text-stone-500">No enrolled courses yet.</p>
+                  <button 
+                    onClick={() => setActiveTab('registration')}
+                    className="mt-4 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700"
+                  >
+                    Register for Courses
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'finance' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+              <h3 className="text-xl font-bold text-stone-900 mb-6">Finance Management</h3>
+              
+              {user?.role === 'student' && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div className="bg-blue-50 p-6 rounded-2xl">
+                      <p className="text-sm text-blue-600 font-medium">Total Balance</p>
+                      <p className="text-2xl font-bold text-blue-900 mt-1">{invoices.reduce((sum, i) => sum + (i.amount || 0), 0)} ETB</p>
+                    </div>
+                    <div className="bg-orange-50 p-6 rounded-2xl">
+                      <p className="text-sm text-orange-600 font-medium">Pending</p>
+                      <p className="text-2xl font-bold text-orange-900 mt-1">{invoices.filter(i => i.status === 'pending').length}</p>
+                    </div>
+                    <div className="bg-emerald-50 p-6 rounded-2xl">
+                      <p className="text-sm text-emerald-600 font-medium">Paid</p>
+                      <p className="text-2xl font-bold text-emerald-900 mt-1">{invoices.filter(i => i.status === 'verified').length}</p>
+                    </div>
+                  </div>
+                  
+                  <h4 className="font-bold text-stone-900 mb-4">My Invoices</h4>
+                  {invoices.length > 0 ? (
+                    <div className="space-y-3">
+                      {invoices.map((invoice: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between p-4 bg-stone-50 rounded-2xl">
+                          <div>
+                            <p className="font-bold text-stone-900">{invoice.description || 'Payment'}</p>
+                            <p className="text-sm text-stone-500">{new Date(invoice.created_at).toLocaleDateString()}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-bold text-stone-900">{invoice.amount} ETB</p>
+                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                              invoice.status === 'verified' ? 'bg-emerald-50 text-emerald-600' : 
+                              invoice.status === 'pending' ? 'bg-orange-50 text-orange-600' : 'bg-red-50 text-red-600'
+                            }`}>
+                              {invoice.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-stone-500 text-center py-4">No invoices found.</p>
+                  )}
+                </>
+              )}
+
+              {(user?.role === 'superadmin' || user?.role === 'branch_admin' || user?.role === 'accountant') && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                    <div className="bg-blue-50 p-6 rounded-2xl">
+                      <p className="text-sm text-blue-600 font-medium">Total Revenue</p>
+                      <p className="text-2xl font-bold text-blue-900 mt-1">1,250,000 ETB</p>
+                    </div>
+                    <div className="bg-emerald-50 p-6 rounded-2xl">
+                      <p className="text-sm text-emerald-600 font-medium">Verified</p>
+                      <p className="text-2xl font-bold text-emerald-900 mt-1">45</p>
+                    </div>
+                    <div className="bg-orange-50 p-6 rounded-2xl">
+                      <p className="text-sm text-orange-600 font-medium">Pending</p>
+                      <p className="text-2xl font-bold text-orange-900 mt-1">8</p>
+                    </div>
+                    <div className="bg-purple-50 p-6 rounded-2xl">
+                      <p className="text-sm text-purple-600 font-medium">Fee Structures</p>
+                      <p className="text-2xl font-bold text-purple-900 mt-1">12</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-4 mb-6">
+                    <button onClick={() => setFinanceTab('verify')} className={`px-4 py-2 text-sm font-bold rounded-xl ${financeTab === 'verify' ? 'bg-emerald-600 text-white' : 'bg-stone-100 text-stone-600'} hover:opacity-90`}>Verify Payment</button>
+                    <button onClick={() => { setFinanceTab('fee'); handleManageFeeStructure(); }} className={`px-4 py-2 text-sm font-bold rounded-xl ${financeTab === 'fee' ? 'bg-emerald-600 text-white' : 'bg-stone-100 text-stone-600'} hover:opacity-90`}>Fee Structure</button>
+                    <button onClick={() => handleGenerateInvoice()} className={`px-4 py-2 text-sm font-bold rounded-xl ${financeTab === 'invoice' ? 'bg-emerald-600 text-white' : 'bg-stone-100 text-stone-600'} hover:opacity-90`}>Generate Invoice</button>
+                  </div>
+                  
+                  <h4 className="font-bold text-stone-900 mb-4">Recent Transactions</h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-stone-50 text-stone-500 text-xs uppercase">
+                          <th className="px-4 py-3">Student</th>
+                          <th className="px-4 py-3">Amount</th>
+                          <th className="px-4 py-3">Type</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        <tr>
+                          <td className="px-4 py-3">John Doe</td>
+                          <td className="px-4 py-3">5,000 ETB</td>
+                          <td className="px-4 py-3">Tuition</td>
+                          <td className="px-4 py-3"><span className="px-2 py-1 bg-emerald-50 text-emerald-600 text-xs rounded-full">Verified</span></td>
+                          <td className="px-4 py-3">2026-03-20</td>
+                        </tr>
+                        <tr>
+                          <td className="px-4 py-3">Jane Smith</td>
+                          <td className="px-4 py-3">3,500 ETB</td>
+                          <td className="px-4 py-3">Registration</td>
+                          <td className="px-4 py-3"><span className="px-2 py-1 bg-orange-50 text-orange-600 text-xs rounded-full">Pending</span></td>
+                          <td className="px-4 py-3">2026-03-21</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'integrations' && user?.role === 'superadmin' && (
+          <IntegrationSettings />
+        )}
+
+        {activeTab === 'registration-periods' && (user?.role === 'superadmin' || user?.role === 'branch_admin') && (
+          <RegistrationPeriodManager />
+        )}
+
+        {activeTab === 'credit-hours' && (user?.role === 'superadmin' || user?.role === 'branch_admin' || user?.role === 'registrar') && (
+          <CreditHourManager />
+        )}
+
+        {activeTab === 'registrar' && (user?.role === 'superadmin' || user?.role === 'registrar') && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
+              <h3 className="text-xl font-bold text-stone-900 mb-6">Registrar Office</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div onClick={() => handleRegistrarAction('Student Records')} className="border border-stone-200 rounded-2xl p-6 text-center hover:border-emerald-200 transition-all cursor-pointer">
+                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 mx-auto mb-4">
+                    <Users size={24} />
+                  </div>
+                  <h4 className="font-bold text-stone-900">Student Records</h4>
+                  <p className="text-sm text-stone-500 mt-1">Manage student data</p>
+                </div>
+                <div onClick={() => handleRegistrarAction('Transcripts')} className="border border-stone-200 rounded-2xl p-6 text-center hover:border-emerald-200 transition-all cursor-pointer">
+                  <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 mx-auto mb-4">
+                    <BookOpen size={24} />
+                  </div>
+                  <h4 className="font-bold text-stone-900">Transcripts</h4>
+                  <p className="text-sm text-stone-500 mt-1">Generate transcripts</p>
+                </div>
+                <div onClick={() => handleRegistrarAction('Course Offerings')} className="border border-stone-200 rounded-2xl p-6 text-center hover:border-emerald-200 transition-all cursor-pointer">
+                  <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center text-purple-600 mx-auto mb-4">
+                    <CreditCard size={24} />
+                  </div>
+                  <h4 className="font-bold text-stone-900">Course Offerings</h4>
+                  <p className="text-sm text-stone-500 mt-1">Manage offerings</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'semester-registrations' && (user?.role === 'superadmin' || user?.role === 'branch_admin' || user?.role === 'registrar') && (
+          <RegistrationManagement />
+        )}
+
+        {activeTab === 'user-management' && (user?.role === 'superadmin' || user?.role === 'branch_admin') && (
+          <UserManagement />
         )}
 
         {isEditModalOpen && selectedStudent && (
@@ -498,6 +1407,97 @@ export default function Dashboard() {
             onClose={() => setIsEditModalOpen(false)} 
             onUpdate={() => { fetchData(); setIsEditModalOpen(false); }} 
           />
+        )}
+        {showNotifications && (
+          <div className="fixed inset-0 z-50 overflow-hidden flex items-start justify-end p-4 sm:p-6 pointer-events-none">
+            <div className="absolute inset-0 pointer-events-auto bg-black/5" onClick={() => setShowNotifications(false)} />
+            <div className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl border border-stone-200 pointer-events-auto flex flex-col max-h-[80vh] overflow-hidden mt-16 sm:mt-20">
+              <div className="p-5 border-b border-stone-100 flex items-center justify-between bg-white sticky top-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-stone-900">Notifications</h3>
+                  {unreadCount > 0 && (
+                    <span className="px-2 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded-full">
+                      {unreadCount} NEW
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <button 
+                      onClick={() => {
+                        axios.post('/api/notifications/read', {}, { headers: { Authorization: `Bearer ${token}` } });
+                        setNotifications(notifications.map(n => ({ ...n, is_read: 1 })));
+                        setUnreadCount(0);
+                      }}
+                      className="text-stone-400 hover:text-emerald-600 transition-colors p-1"
+                      title="Mark all as read"
+                    >
+                      <CheckCheck size={18} />
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => setShowNotifications(false)}
+                    className="text-stone-400 hover:text-stone-600 transition-colors p-1"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-stone-50/50">
+                {notifications.length > 0 ? (
+                  notifications.map((notification) => (
+                    <div 
+                      key={notification.id}
+                      onClick={() => handleMarkNotificationRead(notification.id)}
+                      className={`p-4 rounded-2xl cursor-pointer transition-all border ${
+                        notification.is_read 
+                          ? 'bg-white/50 border-transparent opacity-80' 
+                          : 'bg-white border-emerald-100 shadow-sm'
+                      } hover:bg-stone-50`}
+                    >
+                      <div className="flex gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                          notification.is_read ? 'bg-stone-100 text-stone-400' : 'bg-emerald-50 text-emerald-600'
+                        }`}>
+                          <Bell size={18} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-start mb-1">
+                            <h4 className={`text-sm font-bold truncate ${notification.is_read ? 'text-stone-600' : 'text-stone-900'}`}>
+                              {notification.title}
+                            </h4>
+                            <span className="text-[10px] text-stone-400 whitespace-nowrap">
+                              {new Date(notification.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className={`text-xs leading-relaxed line-clamp-2 ${notification.is_read ? 'text-stone-400' : 'text-stone-500'}`}>
+                            {notification.message}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-12 text-center">
+                    <div className="w-12 h-12 bg-stone-100 rounded-2xl flex items-center justify-center text-stone-300 mx-auto mb-3">
+                      <Bell size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-400">No notifications yet</p>
+                  </div>
+                )}
+              </div>
+              
+              <div className="p-3 border-t border-stone-100 text-center bg-white">
+                <button 
+                  onClick={() => setShowNotifications(false)}
+                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700"
+                >
+                  Close panel
+                </button>
+              </div>
+            </div>
+          </div>
         )}
         <FloatingAI />
       </main>

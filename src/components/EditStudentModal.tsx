@@ -3,9 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, User, MapPin, Phone, Mail, BookOpen, AlertCircle } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 export default function EditStudentModal({ student, onClose, onUpdate }: any) {
   const { token } = useAuth();
+  const { showToast } = useToast();
   const [formData, setFormData] = useState({ ...student });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -19,7 +21,7 @@ export default function EditStudentModal({ student, onClose, onUpdate }: any) {
       onClose();
     } catch (err) {
       console.error(err);
-      alert('Failed to update student.');
+      showToast('Failed to update student.', 'error');
     }
   };
 

@@ -2,12 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, MapPin, Phone, Mail, BookOpen, Upload, ChevronLeft, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 
 export default function StudentRegistration() {
   const { token } = useAuth();
+  const { showToast } = useToast();
   const navigate = useNavigate();
   const [branches, setBranches] = useState<any[]>([]);
   const [programs, setPrograms] = useState<any[]>([]);
@@ -82,11 +84,11 @@ export default function StudentRegistration() {
       await axios.post('/api/students', { ...formData, ...documentUrls }, { 
         headers: { Authorization: `Bearer ${token}` } 
       });
-      alert('Student registered successfully!');
+      showToast('Student registered successfully!', 'success');
       navigate('/dashboard');
     } catch (err) {
       console.error(err);
-      alert('Failed to register student.');
+      showToast('Failed to register student.', 'error');
     }
   };
 

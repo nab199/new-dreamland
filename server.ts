@@ -2,7 +2,6 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import Database from "better-sqlite3";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import multer from "multer";
@@ -17,6 +16,13 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 
+import { db, usePostgresMode as usePostgres } from './src/config/DatabaseConfig';
+import { validatePaymentInsert, validateStudentUpdate, isStrictVerificationSignal } from './src/types/strict';
+import { validateDoubleEntry } from './src/types/ledger';
+import { IDEMPOTENCY_HEADER, validateIdempotencyKey } from './src/types/idempotency';
+import { idempotencyService } from './src/services/idempotencyService';
+import { ledgerService } from './src/services/ledgerService';
+
 dotenv.config();
 dotenv.config({ path: '.env.local' });
 
@@ -27,16 +33,82 @@ const __dirname = path.dirname(__filename);
 
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-const upload = multer({ dest: "uploads/" });
 
-const db = new Database("college.db");
+// SECURITY: Multer configuration with file type validation
+const ALLOWED_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+  'text/csv',
+  'video/mp4',
+  'video/webm',
+  'audio/mpeg',
+  'audio/wav'
+];
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+const fileFilter = (req: express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Invalid file type. Allowed types: ${ALLOWED_MIME_TYPES.join(', ')}`));
+  }
+};
+
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: fileFilter
+});
+
+// Separate uploaders for different purposes
+const uploadDocuments = multer({
+  dest: "uploads/documents/",
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'application/pdf'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Allowed: JPEG, PNG, PDF'));
+    }
+  }
+});
+
+// SECURITY: Error sanitization - don't expose internal errors to clients
+function sanitizeError(error: unknown, context?: string): { message: string; code?: string } {
+  const isDev = process.env.NODE_ENV !== 'production';
+  
+  if (error instanceof Error) {
+    // Log full error for debugging
+    console.error(`[ERROR ${context || 'UNKNOWN'}]:`, error);
+    
+    if (isDev) {
+      // In development, return more details but not sensitive info
+      return { message: error.message.substring(0, 200), code: 'DEV_ERROR' };
+    } else {
+      // In production, return generic messages
+      return { message: 'An unexpected error occurred. Please try again later.', code: 'SERVER_ERROR' };
+    }
+  }
+  
+  return { message: 'An unexpected error occurred.', code: 'UNKNOWN_ERROR' };
+}
 
 // Audit logging helper
-function logAction(userId: number | null, action: string, details: any) {
+async function logAction(userId: number | null, action: string, details: any) {
   try {
-    db.prepare("INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)").run(
-      userId, action, JSON.stringify(details)
-    );
+    const sql = "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)";
+    const params = [userId, action, JSON.stringify(details)];
+    await db.run(sql, params);
   } catch (e) {
     console.error("Audit logging failed:", e);
   }
@@ -45,30 +117,38 @@ function logAction(userId: number | null, action: string, details: any) {
 // Rate limiting
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: { error: "Too many login attempts, please try again later." }
+  max: process.env.NODE_ENV === 'production' ? 5 : 100, // Reduced from 100 to 5 for production
+  message: { error: "Too many login attempts, please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 const publicRegLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10, // Limit each IP to 10 registrations per hour
+  max: process.env.NODE_ENV === 'production' ? 3 : 10, // More restrictive in production
   message: { error: "Too many registration attempts, please try again later." }
 });
 
-// Initialize Database Schema
-db.exec(`
+const smsLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5, // Reduced from 10 to 5
+  message: { error: "Too many SMS requests, please slow down." }
+});
+
+async function initializeSchema() {
+  const schema = `
   CREATE TABLE IF NOT EXISTS branches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     location TEXT,
     contact TEXT
   );
 
   CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
-    role TEXT NOT NULL, -- superadmin, branch_admin, faculty, accountant, student, parent
+    role TEXT NOT NULL, 
     branch_id INTEGER,
     full_name TEXT,
     email TEXT,
@@ -76,426 +156,427 @@ db.exec(`
     locked_until TEXT,
     FOREIGN KEY (branch_id) REFERENCES branches(id)
   );
+  -- ... more tables ...
+  `;
 
-  CREATE TABLE IF NOT EXISTS students (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER UNIQUE,
-    student_id_code TEXT UNIQUE, -- e.g., AA-2024-0001
-    branch_id INTEGER,
-    program_id INTEGER,
-    program_degree TEXT, -- Masters, Certificate, Diploma
-    student_type TEXT, -- Regular, Extension, Weekend, Distance
-    birth_year INTEGER,
-    birth_place_region TEXT,
-    birth_place_zone TEXT,
-    birth_place_woreda TEXT,
-    birth_place_kebele TEXT,
-    contact_phone TEXT,
-    emergency_contact_name TEXT,
-    emergency_contact_phone TEXT,
-    academic_status TEXT DEFAULT 'good_standing', -- good_standing, probation, suspended
-    current_semester_id INTEGER,
-    documents_json TEXT, -- JSON string of document URLs
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (branch_id) REFERENCES branches(id)
-  );
+  // For simplicity in this demo, we'll use the existing SQLite initialization 
+  // if NOT in Postgres mode. If in Postgres mode, we assume schema is already 
+  // set up via Supabase dashboard or migrations.
+  if (!usePostgres) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS students (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        student_id_code TEXT,
+        branch_id INTEGER,
+        program_id INTEGER,
+        program_degree TEXT,
+        student_type TEXT,
+        birth_year TEXT,
+        birth_place_region TEXT,
+        birth_place_zone TEXT,
+        birth_place_woreda TEXT,
+        birth_place_kebele TEXT,
+        contact_phone TEXT,
+        emergency_contact_name TEXT,
+        emergency_contact_phone TEXT,
+        documents_json TEXT,
+        academic_status TEXT DEFAULT 'good_standing',
+        financial_clearance INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (branch_id) REFERENCES branches(id),
+        FOREIGN KEY (program_id) REFERENCES programs(id)
+      );
 
-  CREATE TABLE IF NOT EXISTS parent_students (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    parent_user_id INTEGER,
-    student_id INTEGER,
-    relationship TEXT, -- father, mother, guardian
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (parent_user_id) REFERENCES users(id),
-    FOREIGN KEY (student_id) REFERENCES students(id),
-    UNIQUE(parent_user_id, student_id)
-  );
+      CREATE TABLE IF NOT EXISTS parent_students (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_user_id INTEGER,
+        student_id INTEGER,
+        relationship TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (parent_user_id) REFERENCES users(id),
+        FOREIGN KEY (student_id) REFERENCES students(id),
+        UNIQUE(parent_user_id, student_id)
+      );
 
-  CREATE TABLE IF NOT EXISTS programs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    code TEXT UNIQUE,
-    duration_years INTEGER,
-    total_credits INTEGER
-  );
+      CREATE TABLE IF NOT EXISTS system_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        setting_key TEXT UNIQUE NOT NULL,
+        setting_value TEXT,
+        category TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
 
-  CREATE TABLE IF NOT EXISTS courses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT UNIQUE NOT NULL,
-    title TEXT NOT NULL,
-    credits INTEGER NOT NULL,
-    prerequisites TEXT, -- Comma separated codes
-    is_auditable INTEGER DEFAULT 0
-  );
+      CREATE TABLE IF NOT EXISTS semester_registrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER NOT NULL,
+        semester_id INTEGER NOT NULL,
+        registration_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        status TEXT DEFAULT 'registered',
+        approved_by INTEGER,
+        notes TEXT,
+        FOREIGN KEY (student_id) REFERENCES students(id),
+        FOREIGN KEY (semester_id) REFERENCES semesters(id),
+        FOREIGN KEY (approved_by) REFERENCES users(id),
+        UNIQUE(student_id, semester_id)
+      );
 
-  CREATE TABLE IF NOT EXISTS semesters (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    branch_id INTEGER,
-    academic_year TEXT, -- e.g., 2016 E.C.
-    semester_name TEXT, -- e.g., Semester I
-    start_date TEXT,
-    end_date TEXT,
-    is_active INTEGER DEFAULT 0,
-    FOREIGN KEY (branch_id) REFERENCES branches(id)
-  );
+      CREATE TABLE IF NOT EXISTS programs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        code TEXT UNIQUE,
+        duration_years INTEGER,
+        total_credits INTEGER
+      );
 
-  CREATE TABLE IF NOT EXISTS enrollments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id INTEGER,
-    course_id INTEGER,
-    semester_id INTEGER,
-    grade TEXT, -- A, B, C, D, F, NG
-    points REAL,
-    status TEXT DEFAULT 'enrolled', -- enrolled, dropped, withdrawn
-    FOREIGN KEY (student_id) REFERENCES students(id),
-    FOREIGN KEY (course_id) REFERENCES courses(id),
-    FOREIGN KEY (semester_id) REFERENCES semesters(id)
-  );
+      CREATE TABLE IF NOT EXISTS courses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        credits INTEGER NOT NULL,
+        prerequisites TEXT,
+        is_auditable INTEGER DEFAULT 0,
+        program TEXT,
+        price_per_credit INTEGER DEFAULT 0
+      );
 
-  CREATE TABLE IF NOT EXISTS payments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id INTEGER,
-    amount REAL,
-    type TEXT, -- tuition, registration, etc.
-    status TEXT DEFAULT 'pending', -- pending, paid, verified
-    transaction_ref TEXT,
-    payment_method TEXT, -- chapa, cbe_receipt
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (student_id) REFERENCES students(id)
-  );
+      CREATE TABLE IF NOT EXISTS semesters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER,
+        academic_year TEXT,
+        semester_name TEXT,
+        start_date TEXT,
+        end_date TEXT,
+        is_active INTEGER DEFAULT 0,
+        FOREIGN KEY (branch_id) REFERENCES branches(id)
+      );
 
-  CREATE TABLE IF NOT EXISTS announcements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    branch_id INTEGER,
-    title TEXT,
-    content TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (branch_id) REFERENCES branches(id)
-  );
+      CREATE TABLE IF NOT EXISTS enrollments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER,
+        course_id INTEGER,
+        semester_id INTEGER,
+        grade TEXT,
+        points REAL,
+        status TEXT DEFAULT 'enrolled',
+        FOREIGN KEY (student_id) REFERENCES students(id),
+        FOREIGN KEY (course_id) REFERENCES courses(id),
+        FOREIGN KEY (semester_id) REFERENCES semesters(id)
+      );
 
-  CREATE TABLE IF NOT EXISTS academic_calendars (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    branch_id INTEGER,
-    semester_name TEXT,
-    start_date TEXT,
-    end_date TEXT,
-    reg_start_date TEXT,
-    reg_end_date TEXT,
-    exam_start_date TEXT,
-    exam_end_date TEXT,
-    FOREIGN KEY (branch_id) REFERENCES branches(id)
-  );
+      CREATE TABLE IF NOT EXISTS payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER,
+        amount REAL,
+        type TEXT,
+        status TEXT DEFAULT 'pending',
+        transaction_ref TEXT,
+        payment_method TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id) REFERENCES students(id)
+      );
 
-  CREATE TABLE IF NOT EXISTS audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    action TEXT,
-    details TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
+      CREATE TABLE IF NOT EXISTS announcements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER,
+        title TEXT,
+        content TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (branch_id) REFERENCES branches(id)
+      );
 
-  CREATE TABLE IF NOT EXISTS password_reset_tokens (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    token TEXT UNIQUE,
-    expires_at DATETIME,
-    used INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
+      CREATE TABLE IF NOT EXISTS academic_calendars (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER,
+        semester_name TEXT,
+        start_date TEXT,
+        end_date TEXT,
+        reg_start_date TEXT,
+        reg_end_date TEXT,
+        exam_start_date TEXT,
+        exam_end_date TEXT,
+        FOREIGN KEY (branch_id) REFERENCES branches(id)
+      );
 
-  CREATE TABLE IF NOT EXISTS registration_otps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    identifier TEXT NOT NULL,
-    code TEXT NOT NULL,
-    expires_at DATETIME,
-    verified INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        action TEXT,
+        details TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
 
-  CREATE TABLE IF NOT EXISTS notifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    title TEXT,
-    message TEXT,
-    is_read INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        token TEXT UNIQUE,
+        expires_at DATETIME,
+        used INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
 
-  CREATE TABLE IF NOT EXISTS fee_structures (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    program_id INTEGER,
-    semester_id INTEGER,
-    fee_type TEXT, -- tuition, registration, library, lab
-    amount REAL,
-    FOREIGN KEY (program_id) REFERENCES programs(id),
-    FOREIGN KEY (semester_id) REFERENCES semesters(id)
-  );
-`);
+      CREATE TABLE IF NOT EXISTS registration_otps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        identifier TEXT NOT NULL,
+        code TEXT NOT NULL,
+        expires_at DATETIME,
+        verified INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
 
-// Add new columns to students if they don't exist
-try {
-  db.prepare("ALTER TABLE students ADD COLUMN birth_location TEXT").run();
-} catch (e) {}
+      CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        title TEXT,
+        message TEXT,
+        is_read INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
 
-try {
-  db.prepare("ALTER TABLE students ADD COLUMN program_degree TEXT").run();
-} catch (e) {}
+      CREATE TABLE IF NOT EXISTS fee_structures (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        program_id INTEGER,
+        semester_id INTEGER,
+        fee_type TEXT,
+        amount REAL,
+        FOREIGN KEY (program_id) REFERENCES programs(id),
+        FOREIGN KEY (semester_id) REFERENCES semesters(id)
+      );
 
-try {
-  db.prepare("ALTER TABLE students ADD COLUMN financial_clearance INTEGER DEFAULT 0").run();
-} catch (e) {}
+      CREATE TABLE IF NOT EXISTS idempotency_keys (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        idempotency_key TEXT UNIQUE NOT NULL,
+        request_hash TEXT NOT NULL,
+        response_status INTEGER DEFAULT -1,
+        response_body TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NOT NULL
+      );
 
-// Migrations for users table security enhancements
-try {
-  db.prepare("ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER DEFAULT 0").run();
-} catch (e) {}
+      CREATE TABLE IF NOT EXISTS accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        parent_id INTEGER,
+        is_active INTEGER DEFAULT 1,
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (parent_id) REFERENCES accounts(id)
+      );
 
-try {
-  db.prepare("ALTER TABLE users ADD COLUMN locked_until TEXT").run();
-} catch (e) {}
+      CREATE TABLE IF NOT EXISTS journal_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_number TEXT UNIQUE NOT NULL,
+        date DATETIME NOT NULL,
+        description TEXT,
+        reference_type TEXT,
+        reference_id INTEGER,
+        status TEXT DEFAULT 'pending',
+        posted_by INTEGER,
+        posted_at DATETIME,
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (posted_by) REFERENCES users(id)
+      );
 
-try {
-  db.prepare("ALTER TABLE users ADD COLUMN email TEXT").run();
-} catch (e) {}
+      CREATE TABLE IF NOT EXISTS journal_entry_lines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        journal_entry_id INTEGER NOT NULL,
+        account_id INTEGER NOT NULL,
+        entry_type TEXT NOT NULL,
+        amount REAL NOT NULL,
+        memo TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (journal_entry_id) REFERENCES journal_entries(id),
+        FOREIGN KEY (account_id) REFERENCES accounts(id)
+      );
+    `);
+    
+    // Safe migrations for SQLite - check if columns exist before adding
+    function safeAddColumn(table: string, column: string, definition: string) {
+      try {
+        const result = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+        const exists = result.some(col => col.name === column);
+        if (!exists) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+        }
+      } catch (e) {
+        // Column may already exist or table doesn't exist - safe to ignore
+      }
+    }
 
-// Add grade columns to enrollments if they don't exist
-try {
-  db.prepare("ALTER TABLE enrollments ADD COLUMN assignment_grade REAL").run();
-  db.prepare("ALTER TABLE enrollments ADD COLUMN midterm_grade REAL").run();
-  db.prepare("ALTER TABLE enrollments ADD COLUMN final_grade REAL").run();
-  db.prepare("ALTER TABLE enrollments ADD COLUMN is_audit INTEGER DEFAULT 0").run();
-  db.prepare("ALTER TABLE enrollments ADD COLUMN resolution_deadline TEXT").run();
-} catch (e) {
-  // Columns likely already exist
+    safeAddColumn('users', 'failed_login_attempts', 'INTEGER DEFAULT 0');
+    safeAddColumn('users', 'locked_until', 'TEXT');
+    safeAddColumn('course_materials', 'uploaded_by', 'INTEGER');
+    
+    // Create indexes for better query performance and security
+    const indexes = [
+      'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);',
+      'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token);',
+      'CREATE INDEX IF NOT EXISTS idx_registration_otps_identifier ON registration_otps(identifier);',
+      'CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);',
+      'CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);',
+      'CREATE INDEX IF NOT EXISTS idx_payments_student_id ON payments(student_id);',
+      'CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);',
+      'CREATE INDEX IF NOT EXISTS idx_payments_transaction_ref ON payments(transaction_ref);',
+      'CREATE INDEX IF NOT EXISTS idx_journal_entries_reference ON journal_entries(reference_type, reference_id);',
+      'CREATE INDEX IF NOT EXISTS idx_journal_entries_status ON journal_entries(status);',
+      'CREATE INDEX IF NOT EXISTS idx_students_user_id ON students(user_id);',
+      'CREATE INDEX IF NOT EXISTS idx_students_branch_id ON students(branch_id);',
+      'CREATE INDEX IF NOT EXISTS idx_enrollments_student_id ON enrollments(student_id);',
+      'CREATE INDEX IF NOT EXISTS idx_enrollments_semester_id ON enrollments(semester_id);',
+      'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);',
+      'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);'
+    ];
+    
+    for (const indexSql of indexes) {
+      try { db.exec(indexSql); } catch (e) { /* Index may already exist */ }
+    }
+    
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS registration_periods (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER,
+        semester_id INTEGER,
+        start_date TEXT,
+        end_date TEXT,
+        is_open INTEGER DEFAULT 0,
+        description TEXT,
+        course_ids TEXT,
+        FOREIGN KEY (semester_id) REFERENCES semesters(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        course_id INTEGER,
+        semester_id INTEGER,
+        title TEXT,
+        description TEXT,
+        due_date TEXT,
+        max_points REAL,
+        FOREIGN KEY (course_id) REFERENCES courses(id),
+        FOREIGN KEY (semester_id) REFERENCES semesters(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS submissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assignment_id INTEGER,
+        student_id INTEGER,
+        file_url TEXT,
+        submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        grade REAL,
+        feedback TEXT,
+        FOREIGN KEY (assignment_id) REFERENCES assignments(id),
+        FOREIGN KEY (student_id) REFERENCES students(id)
+      );
+    `);
+  } else {
+    // In Postgres mode, we could run migrations here if needed
+    console.log("🐘 Supabase Schema assumed to be managed via migrations/supabase_schema.sql");
+  }
 }
 
-// Create new tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS registration_periods (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    branch_id INTEGER,
-    semester_id INTEGER,
-    start_date TEXT,
-    end_date TEXT,
-    is_open INTEGER DEFAULT 1,
-    FOREIGN KEY (branch_id) REFERENCES branches(id),
-    FOREIGN KEY (semester_id) REFERENCES semesters(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS course_offerings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    course_id INTEGER,
-    semester_id INTEGER,
-    capacity INTEGER DEFAULT 30,
-    FOREIGN KEY (course_id) REFERENCES courses(id),
-    FOREIGN KEY (semester_id) REFERENCES semesters(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS course_waitlist (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    course_offering_id INTEGER,
-    student_id INTEGER,
-    position INTEGER,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (course_offering_id) REFERENCES course_offerings(id),
-    FOREIGN KEY (student_id) REFERENCES students(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS rooms (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    branch_id INTEGER,
-    name TEXT NOT NULL,
-    capacity INTEGER,
-    type TEXT, -- Lecture Hall, Lab, Seminar Room
-    FOREIGN KEY (branch_id) REFERENCES branches(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS course_offerings_faculty (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    course_offering_id INTEGER,
-    user_id INTEGER, -- faculty user_id
-    role TEXT DEFAULT 'Lecturer',
-    FOREIGN KEY (course_offering_id) REFERENCES course_offerings(id),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS class_schedule (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    course_offering_id INTEGER,
-    room_id INTEGER,
-    day_of_week INTEGER, -- 0 (Sun) to 6 (Sat)
-    start_time TEXT, -- HH:MM
-    end_time TEXT, -- HH:MM
-    FOREIGN KEY (course_offering_id) REFERENCES course_offerings(id),
-    FOREIGN KEY (room_id) REFERENCES rooms(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS attendance (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    enrollment_id INTEGER,
-    date TEXT, -- YYYY-MM-DD
-    status TEXT, -- Present, Absent, Late, Excused
-    notes TEXT,
-    FOREIGN KEY (enrollment_id) REFERENCES enrollments(id)
-  );
-
-  -- Finance & Scholarships
-  CREATE TABLE IF NOT EXISTS scholarships (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    type TEXT, -- Percentage, Fixed
-    value REAL
-  );
-
-  CREATE TABLE IF NOT EXISTS invoices (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id INTEGER,
-    semester_id INTEGER,
-    total_amount REAL,
-    scholarship_id INTEGER,
-    balance_due REAL,
-    status TEXT DEFAULT 'Pending', -- Pending, Paid, Partial
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (student_id) REFERENCES students(id),
-    FOREIGN KEY (scholarship_id) REFERENCES scholarships(id)
-  );
-
-  -- LMS: Course Materials & Assignments
-  CREATE TABLE IF NOT EXISTS course_materials (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    course_offering_id INTEGER,
-    title TEXT,
-    file_url TEXT,
-    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (course_offering_id) REFERENCES course_offerings(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS assignments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    course_offering_id INTEGER,
-    title TEXT,
-    description TEXT,
-    file_url TEXT,
-    deadline DATETIME,
-    FOREIGN KEY (course_offering_id) REFERENCES course_offerings(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS submissions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    assignment_id INTEGER,
-    student_id INTEGER,
-    file_url TEXT,
-    submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    grade REAL,
-    feedback TEXT,
-    FOREIGN KEY (assignment_id) REFERENCES assignments(id),
-    FOREIGN KEY (student_id) REFERENCES students(id)
-  );
-`);
-
-// Seed initial data if empty
-const branchCount = db.prepare("SELECT COUNT(*) as count FROM branches").get() as { count: number };
-if (branchCount.count === 0) {
-  db.prepare("INSERT INTO branches (name, location, contact) VALUES (?, ?, ?)").run("Addis Ababa Main", "Addis Ababa, 4 Kilo", "+251111223344");
-  db.prepare("INSERT INTO branches (name, location, contact) VALUES (?, ?, ?)").run("Adama Branch", "Adama, City Center", "+251221112233");
+// Seed initial data
+async function seedData() {
+  if (usePostgres) return; // Skip seeding for Supabase in this demo (assume pre-seeded)
   
-  const adminPassword = bcrypt.hashSync("admin123", 10);
-  db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run("admin", adminPassword, "superadmin", "System Administrator", "admin@dreamland.edu");
-  
-  db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run("registrar", bcrypt.hashSync("registrar123", 10), "registrar", "Branch Registrar", "registrar@dreamland.edu");
-  db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run("accountant", bcrypt.hashSync("accountant123", 10), "accountant", "Senior Accountant", "accountant@dreamland.edu");
-  db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run("faculty", bcrypt.hashSync("faculty123", 10), "faculty", "Dr. Jane Smith", "faculty@dreamland.edu");
-  
-  db.prepare("INSERT INTO programs (name, code, duration_years, total_credits) VALUES (?, ?, ?, ?)").run("Computer Science", "CS", 4, 147);
-  db.prepare("INSERT INTO programs (name, code, duration_years, total_credits) VALUES (?, ?, ?, ?)").run("Accounting & Finance", "ACC", 3, 110);
+  const branchCount = await db.get("SELECT COUNT(*) as count FROM branches") as { count: number };
+  if (branchCount.count === 0) {
+    await db.run("INSERT INTO branches (name, location, contact) VALUES (?, ?, ?)", ["Main Campus", "Addis Ababa", "+251-911-123456"]);
+    await db.run("INSERT INTO scholarships (name, type, value) VALUES (?, ?, ?)", ["Financial Aid", "Fixed", 2000.0]);
+  }
 
-  db.prepare("INSERT INTO courses (code, title, credits) VALUES (?, ?, ?)").run("CS101", "Introduction to Programming", 3);
-  db.prepare("INSERT INTO courses (code, title, credits) VALUES (?, ?, ?)").run("CS102", "Data Structures", 4);
+  const hashedPassword = await bcrypt.hash("nabiot123", 10);
+  const mockAccounts = [
+    { username: "superadmin", role: "superadmin", full_name: "Super Administrator", email: "superadmin@dreamland.edu" },
+    { username: "branch_admin", role: "branch_admin", full_name: "Branch Administrator", email: "branch_admin@dreamland.edu", branch_id: 1 },
+    { username: "faculty", role: "faculty", full_name: "Faculty Member", email: "faculty@dreamland.edu", branch_id: 1 },
+    { username: "accountant", role: "accountant", full_name: "Accountant", email: "accountant@dreamland.edu", branch_id: 1 },
+    { username: "registrar", role: "registrar", full_name: "Registrar", email: "registrar@dreamland.edu", branch_id: 1 },
+    { username: "student", role: "student", full_name: "Student User", email: "student@dreamland.edu", branch_id: 1 },
+  ];
 
-  // Seed Semester & Registration Period
-  const semResult = db.prepare("INSERT INTO semesters (branch_id, academic_year, semester_name, is_active) VALUES (?, ?, ?, ?)").run(1, "2016 E.C.", "Semester I", 1);
-  db.prepare("INSERT INTO registration_periods (branch_id, semester_id, start_date, end_date, is_open) VALUES (?, ?, ?, ?, ?)").run(1, semResult.lastInsertRowid, "2024-01-01", "2026-12-31", 1);
-  
-  // Seed Course Offerings
-  db.prepare("INSERT INTO course_offerings (course_id, semester_id, capacity) VALUES (?, ?, ?)").run(1, semResult.lastInsertRowid, 50);
-  db.prepare("INSERT INTO course_offerings (course_id, semester_id, capacity) VALUES (?, ?, ?)").run(2, semResult.lastInsertRowid, 40);
-
-  // Seed Rooms
-  db.prepare("INSERT INTO rooms (branch_id, name, capacity, type) VALUES (?, ?, ?, ?)").run(1, "Hall A1", 60, "Lecture Hall");
-  db.prepare("INSERT INTO rooms (branch_id, name, capacity, type) VALUES (?, ?, ?, ?)").run(1, "Lab B2", 30, "Computer Lab");
-
-  // Seed Faculty Assignments (Assigning the admin as faculty for demo purposes if no other user exists)
-  db.prepare("INSERT INTO course_offerings_faculty (course_offering_id, user_id, role) VALUES (?, ?, ?)").run(1, 1, "Lecturer");
-
-  // Seed Schedules
-  db.prepare("INSERT INTO class_schedule (course_offering_id, room_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?, ?)").run(1, 1, 1, "08:30", "10:30"); // Mon 8:30-10:30
-  db.prepare("INSERT INTO class_schedule (course_offering_id, room_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?, ?)").run(2, 2, 2, "14:00", "16:00"); // Tue 14:00-16:00
-
-  // Seed Scholarships
-  db.prepare("INSERT INTO scholarships (name, type, value) VALUES (?, ?, ?)").run("Merit Scholarship", "Percentage", 50.0);
-  db.prepare("INSERT INTO scholarships (name, type, value) VALUES (?, ?, ?)").run("Financial Aid", "Fixed", 2000.0);
+  for (const account of mockAccounts) {
+    const existing = await db.get("SELECT id FROM users WHERE username = ?", [account.username]);
+    if (!existing) {
+      await db.run(
+        "INSERT INTO users (username, password, role, full_name, email, branch_id) VALUES (?, ?, ?, ?, ?, ?)",
+        [account.username, hashedPassword, account.role, account.full_name, account.email, account.branch_id || null]
+      );
+      console.log(`Created mock account: ${account.username} / nabiot123`);
+    }
+  }
 }
 
 import cron from 'node-cron';
 import { AfroMessageService } from './src/services/messaging/afroMessageService';
 import { EmailService } from './src/services/messaging/emailService';
+import { TelegramService } from './src/services/messaging/telegramService';
 import { AIService } from './src/services/ai/aiService';
 import { BackupService } from './src/services/backup/backupService';
 import { ChapaService } from './src/services/payment/chapaService';
 
-// Initialize services
-const afroMessage = new AfroMessageService({
-  apiKey: process.env.AFROMESSAGE_API_KEY,
-  senderId: process.env.AFROMESSAGE_SENDER_ID || 'Dreamland'
-});
+// Helper to load settings from database
+async function loadDbSettings() {
+  try {
+    const settings = await db.all("SELECT setting_key, setting_value FROM system_settings");
+    const settingsObj: any = {};
+    settings.forEach((s: any) => {
+      try {
+        settingsObj[s.setting_key] = JSON.parse(s.setting_value);
+      } catch {
+        settingsObj[s.setting_key] = s.setting_value;
+      }
+    });
+    return settingsObj;
+  } catch (e) {
+    console.log("No stored settings found, using environment variables");
+    return {};
+  }
+}
 
-// Initialize Email Service (Using Resend - Modern Email API)
-const emailService = new EmailService({
-  enabled: process.env.EMAIL_ENABLED === 'true',
-  provider: (process.env.EMAIL_PROVIDER as 'resend' | 'smtp') || 'resend',
-  resendApiKey: process.env.RESEND_API_KEY,
-  fromName: process.env.EMAIL_FROM_NAME || 'Dreamland College',
-  fromAddress: process.env.EMAIL_FROM_ADDRESS || 'onboarding@resend.dev'
-});
-
-const aiService = new AIService();
-const backupService = new BackupService();
-
-// Initialize Chapa Payment Service
-const chapa = new ChapaService({
-  secretKey: process.env.CHAPA_SECRET_KEY,
-  publicKey: process.env.CHAPA_PUBLIC_KEY,
-  webhookSecret: process.env.CHAPA_WEBHOOK_SECRET
-});
+let afroMessage: AfroMessageService;
+let emailService: EmailService;
+let aiService: AIService;
+let backupService: BackupService;
+let telegramService: TelegramService;
+let chapa: ChapaService;
 
 // Daily Cron Job at 08:00
 cron.schedule('0 8 * * *', async () => {
   const today = new Date().toISOString().split('T')[0];
 
-  // 1. Registration Day Reminders
-  const regPeriods = db.prepare("SELECT * FROM registration_periods WHERE end_date = ? AND is_open = 1").all(today) as any[];
+  // 1. Registration Day Reminders - Using SMS
+  const regPeriods = await db.all("SELECT * FROM registration_periods WHERE end_date = ? AND is_open = 1", [today]);
   for (const period of regPeriods) {
-    const students = db.prepare("SELECT s.phone, s.full_name FROM students s JOIN enrollments e ON s.id = e.student_id WHERE e.semester_id = ?").all(period.semester_id) as any[];
+    const students = await db.all("SELECT s.contact_phone, s.full_name FROM students s JOIN enrollments e ON s.id = e.student_id WHERE e.semester_id = ?", [period.semester_id]);
     for (const student of students) {
-      await afroMessage.sendSMS(student.phone, `Dear ${student.full_name}, today is the last day for registration. Please complete your payment.`);
+      if (student.contact_phone && afroMessage) {
+        await afroMessage.sendSMS(student.contact_phone, `Dear ${student.full_name}, today is the last day for registration. Please complete your payment.`);
+      }
     }
   }
 
-  // 2. End of Course Reminders
-  const coursesEnding = db.prepare("SELECT c.title, e.student_id FROM enrollments e JOIN courses c ON e.course_id = c.id JOIN academic_calendars ac ON e.semester_id = ac.id WHERE ac.end_date = ?").all(today) as any[];
+  // 2. End of Course Reminders - Using SMS
+  const coursesEnding = await db.all("SELECT c.title, e.student_id FROM enrollments e JOIN courses c ON e.course_id = c.id JOIN academic_calendars ac ON e.semester_id = ac.id WHERE ac.end_date = ?", [today]);
   for (const record of coursesEnding) {
-    const student = db.prepare("SELECT phone, full_name FROM students WHERE id = ?").get(record.student_id) as any;
-    if (student) {
-      await afroMessage.sendSMS(student.phone, `Dear ${student.full_name}, your course ${record.title} is ending today. Please ensure all payments are settled.`);
+    const student = await db.get("SELECT contact_phone, full_name FROM students WHERE id = ?", [record.student_id]);
+    if (student && student.contact_phone && afroMessage) {
+      await afroMessage.sendSMS(student.contact_phone, `Dear ${student.full_name}, your course ${record.title} is ending today. Please ensure all payments are settled.`);
     }
   }
 });
 
 // Daily Backup at 02:00 AM
 cron.schedule('0 2 * * *', async () => {
+  if (!backupService) return;
   console.log('Running scheduled database backup...');
   const result = await backupService.createBackup('scheduled_daily');
   if (result.success) {
@@ -507,19 +588,20 @@ cron.schedule('0 2 * * *', async () => {
 
 // Weekly At-Risk Student Report (Monday 09:00)
 cron.schedule('0 9 * * 1', async () => {
+  if (!aiService) return;
   console.log('Generating weekly at-risk student report...');
-  const students = db.prepare(`
+  const students = await db.all(`
     SELECT s.*, u.full_name, u.email, 
            (SELECT COUNT(*) FROM enrollments e WHERE e.student_id = s.id AND e.grade = 'F') as failed_courses
     FROM students s
     JOIN users u ON s.user_id = u.id
-  `).all() as any[];
+  `);
 
   const atRiskStudents = await aiService.identifyAtRiskStudents(students);
   
   if (atRiskStudents.length > 0) {
     // Notify admins
-    const admins = db.prepare("SELECT email FROM users WHERE role = 'superadmin'").all() as any[];
+    const admins = await db.all("SELECT email FROM users WHERE role = 'superadmin'");
     for (const admin of admins) {
       console.log(`At-risk report sent to: ${admin.email}`);
     }
@@ -527,14 +609,83 @@ cron.schedule('0 9 * * 1', async () => {
 });
 
 async function startServer() {
+  // Initialize Database
+  await initializeSchema();
+  await seedData();
+  
+  const dbSettings = await loadDbSettings();
+
+  // Initialize Services with dbSettings
+  afroMessage = new AfroMessageService({
+    apiKey: dbSettings.sms_config?.apiKey || process.env.AFROMESSAGE_API_KEY,
+    senderId: dbSettings.sms_config?.senderId || process.env.AFROMESSAGE_SENDER_ID || 'Dreamland',
+    identifierId: dbSettings.sms_config?.identifierId || process.env.AFROMESSAGE_IDENTIFIER_ID || '',
+    mockMode: dbSettings.sms_config?.mockMode || process.env.AFROMESSAGE_MOCK_MODE === 'true'
+  });
+
+  emailService = new EmailService({
+    enabled: dbSettings.email_config?.enabled ?? (process.env.EMAIL_ENABLED === 'true'),
+    provider: (dbSettings.email_config?.provider || process.env.EMAIL_PROVIDER as 'resend' | 'smtp') || 'resend',
+    resendApiKey: dbSettings.email_config?.resendApiKey || process.env.RESEND_API_KEY,
+    fromName: dbSettings.email_config?.fromName || process.env.EMAIL_FROM_NAME || 'Dreamland College',
+    fromAddress: dbSettings.email_config?.fromAddress || process.env.EMAIL_FROM_ADDRESS || 'onboarding@resend.dev'
+  });
+
+  aiService = new AIService();
+  backupService = new BackupService();
+  telegramService = new TelegramService(process.env.TELEGRAM_BOT_TOKEN);
+
+  chapa = new ChapaService({
+    secretKey: dbSettings.payment_config?.secretKey || process.env.CHAPA_SECRET_KEY,
+    publicKey: dbSettings.payment_config?.publicKey || process.env.CHAPA_PUBLIC_KEY,
+    webhookSecret: dbSettings.payment_config?.webhookSecret || process.env.CHAPA_WEBHOOK_SECRET
+  });
+
   const app = express();
   const PORT = parseInt(process.env.PORT || "3000");
 
   // Security middleware
-  app.use(helmet({ contentSecurityPolicy: false })); // Disable CSP for dev (Vite injects scripts)
+  app.use(helmet({ 
+    contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false 
+  }));
+  
+  const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',') 
+    : [
+        'http://localhost:5173', 
+        'http://localhost:3000',
+        'https://dreamland-college.vercel.app',
+        'https://dreamland.edu.et'
+      ];
+
   app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:5173'],
-    credentials: true
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      
+      const isProduction = process.env.NODE_ENV === 'production';
+      
+      // SECURITY: In production, only allow specific origins
+      if (isProduction) {
+        if (allowedOrigins.indexOf(origin) !== -1) {
+          callback(null, true);
+        } else {
+          console.warn(`[CORS] Blocked origin: ${origin}`);
+          callback(new Error('Not allowed by CORS'));
+        }
+      } else {
+        // In development, allow localhost and log other origins
+        if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+          callback(null, true);
+        } else {
+          console.warn(`[CORS] Development mode: blocking non-localhost origin: ${origin}`);
+          callback(new Error('Not allowed by CORS in development'));
+        }
+      }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key']
   }));
   app.use(express.json({ limit: '10mb' }));
 
@@ -554,7 +705,7 @@ async function startServer() {
 
   // OTP Verification for Registration
   app.post("/api/public/send-otp", async (req, res) => {
-    const { identifier, type, full_name } = req.body; // identifier: phone or email, type: 'phone' or 'email'
+    const { identifier, type, full_name, phone } = req.body;
     const code = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
 
@@ -562,18 +713,26 @@ async function startServer() {
       // Store OTP
       db.prepare("INSERT INTO registration_otps (identifier, code, expires_at) VALUES (?, ?, ?)").run(identifier, code, expiresAt);
       
-      if (type === 'phone') {
-        const message = `🎓 Dreamland College Registration\n\nYour verification code is: ${code}\n\nDo not share this code with anyone.`;
-        await afroMessage.sendSMS(identifier, message);
+      if (type === 'sms' && phone) {
+        // Send via SMS
+        const smsResult = await afroMessage.sendSMS(
+          phone, 
+          `Dreamland College: Your verification code is ${code}. Valid for 10 minutes. Do not share.`
+        );
+        if (smsResult.success) {
+          res.json({ success: true, message: `OTP sent to ${phone}`, method: 'sms', messageId: smsResult.messageId });
+        } else {
+          res.status(500).json({ error: 'Failed to send SMS. Please try again.', details: smsResult.error });
+        }
       } else {
+        // Fallback to Email
         await emailService.sendNotification(
           identifier, 
           '🎓 Dreamland College Verification', 
           `Hello ${full_name || 'Student'},\n\nYour verification code for registration is: ${code}\n\nThis code will expire in 10 minutes.`
         );
+        res.json({ success: true, message: `OTP sent to ${identifier}`, method: 'email' });
       }
-      
-      res.json({ success: true, message: `OTP sent to ${identifier}` });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to send verification code. Please try again.' });
     }
@@ -597,20 +756,25 @@ async function startServer() {
     }
   });
 
-  app.post("/api/public/upload", upload.single("file"), (req, res) => {
+  // SECURITY: Public upload with file type validation
+  app.post("/api/public/upload", uploadDocuments.single("file"), (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    res.json({ url: `/uploads/${req.file.filename}` });
+    res.json({ url: `/uploads/documents/${req.file.filename}` });
   });
 
   app.post("/api/public/register-student", publicRegLimiter, async (req, res) => {
     const { 
       full_name, birth_year, region, zone, woreda, kebele, 
-      phone, email, emergency_name, emergency_phone,
+      phone, email, afroMessage_username, emergency_name, emergency_phone,
       program_id, program_degree, student_type, branch_id, 
       diploma_url, transcript_url, id_card_url, portrait_url, password
     } = req.body;
 
-    const hashedPassword = await bcrypt.hash(password || "password123", 10);
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!password || !passwordRegex.test(password)) {
+      return res.status(400).json({ error: "Password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character." });
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // Generate Student ID: BRANCH-YEAR-SEQUENCE
     const branch = db.prepare("SELECT name FROM branches WHERE id = ?").get(branch_id) as any;
@@ -686,7 +850,7 @@ async function startServer() {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) return res.status(401).json({ error: "Unauthorized" });
     try {
-      req.user = jwt.verify(token, JWT_SECRET);
+      req.user = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
       next();
     } catch (e) {
       res.status(401).json({ error: "Invalid token" });
@@ -710,7 +874,8 @@ async function startServer() {
       const response = await aiService.chatbotResponse(message);
       res.json({ response });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER ERROR]", error);
+      res.status(500).json({ error: "An internal server error occurred." });
     }
   });
 
@@ -723,7 +888,7 @@ async function startServer() {
         provider: 'Google Gemini'
       },
       sms: {
-        status: process.env.AFROMESSAGE_API_KEY && process.env.AFROMESSAGE_API_KEY !== 'demo_key' ? 'configured' : 'demo_mode',
+        status: process.env.AFROMESSAGE_API_KEY && process.env.AFROMESSAGE_API_KEY !== 'YOUR_AFROMESSAGE_API_KEY_HERE' ? 'configured' : 'demo_mode',
         provider: 'AfroMessage'
       },
       email: {
@@ -781,8 +946,46 @@ async function startServer() {
         db.prepare("UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?").run(user.id);
       }
 
-      const token = jwt.sign({ id: user.id, username: user.username, role: user.role, branch_id: user.branch_id }, JWT_SECRET, { expiresIn: '8h' });
-      const refreshToken = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+      // For students, check semester registration status
+      if (user.role === 'student') {
+        const student = db.prepare("SELECT id FROM students WHERE user_id = ?").get(user.id) as any;
+        
+        if (student) {
+          const activeSemester = db.prepare("SELECT id FROM semesters WHERE is_active = 1 ORDER BY id DESC LIMIT 1").get() as any;
+          const period = db.prepare("SELECT * FROM registration_periods WHERE is_open = 1 ORDER BY id DESC LIMIT 1").get() as any;
+          
+          if (activeSemester) {
+            const registration = db.prepare("SELECT status FROM semester_registrations WHERE student_id = ? AND semester_id = ?").get(student.id, activeSemester.id) as any;
+            
+            if (!registration) {
+              // No registration record - check if in open registration period
+              if (!period) {
+                // Not in registration period - block login
+                logAction(user.id, "LOGIN_BLOCKED_NO_REGISTRATION", { reason: "Not registered for current semester and registration period is closed" });
+                return res.status(403).json({ 
+                  error: "BLOCKED",
+                  message: "You are not registered for the current semester. Registration period is closed. Please visit the registrar's office.",
+                  requiresOfficeVisit: true
+                });
+              }
+            } else if (registration.status === 'banned') {
+              // Student is banned
+              logAction(user.id, "LOGIN_BLOCKED_BANNED", { reason: "Student banned from registration" });
+              return res.status(403).json({ 
+                error: "BLOCKED",
+                message: "You have been restricted from the system. Please visit the registrar's office.",
+                requiresOfficeVisit: true
+              });
+            } else if (registration.status === 'pending_approval') {
+              // Student has pending approval - allow login but show message
+              logAction(user.id, "LOGIN_PENDING_APPROVAL", { message: "Student waiting for registration approval" });
+            }
+          }
+        }
+      }
+
+      const token = jwt.sign({ id: user.id, username: user.username, role: user.role, branch_id: user.branch_id }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '8h' });
+      const refreshToken = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '7d' });
       
       logAction(user.id, "LOGIN_SUCCESS", { username, rememberMe });
       res.json({ 
@@ -823,14 +1026,14 @@ async function startServer() {
     }
 
     try {
-      const decoded: any = jwt.verify(refreshToken, JWT_SECRET);
+      const decoded: any = jwt.verify(refreshToken, JWT_SECRET, { algorithms: ['HS256'] });
       const user = db.prepare("SELECT * FROM users WHERE id = ?").get(decoded.id) as any;
       
       if (!user) {
         return res.status(401).json({ error: "User not found" });
       }
 
-      const newToken = jwt.sign({ id: user.id, username: user.username, role: user.role, branch_id: user.branch_id }, JWT_SECRET, { expiresIn: '8h' });
+      const newToken = jwt.sign({ id: user.id, username: user.username, role: user.role, branch_id: user.branch_id }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '8h' });
       
       res.json({ token: newToken, user: { id: user.id, username: user.username, role: user.role, full_name: user.full_name, branch_id: user.branch_id } });
     } catch (e) {
@@ -865,10 +1068,10 @@ async function startServer() {
     `).run(user.id, token, expiresAt);
 
     // TODO: Send email with reset link
-    // For now, log the token (in production, send via email)
-    console.log(`Password reset link for ${email}: /reset-password?token=${token}`);
+    // SECURITY: Never log tokens - only log that a reset was requested
+    console.log(`Password reset requested for: ${email.substring(0, 3)}***@***`);
     
-    logAction(user.id, "PASSWORD_RESET_REQUEST", { email });
+    logAction(user.id, "PASSWORD_RESET_REQUEST", { email: email.substring(0, 3) + '***' });
     res.json({ message: "If the email exists, a reset link has been sent" });
   });
 
@@ -985,8 +1188,18 @@ async function startServer() {
     res.json(students);
   });
 
-  app.get("/api/students/:id/transcript", authenticate, (req, res) => {
+  app.get("/api/students/:id/transcript", authenticate, authorize(['superadmin', 'branch_admin', 'registrar', 'instructor', 'student']), (req, res) => {
     const studentId = req.params.id;
+    const { role, id: userId } = (req as any).user;
+
+    // Ownership check for students
+    if (role === 'student') {
+      const studentRecord = db.prepare("SELECT id FROM students WHERE user_id = ?").get(userId) as any;
+      if (!studentRecord || studentRecord.id !== parseInt(studentId)) {
+        return res.status(403).json({ error: "Forbidden: You can only view your own transcript" });
+      }
+    }
+
     const student = db.prepare(`
       SELECT s.*, u.full_name, p.name as program_name, b.name as branch_name 
       FROM students s 
@@ -1074,7 +1287,11 @@ async function startServer() {
       program_id, program_degree, student_type, branch_id, status, password
     } = req.body;
 
-    const hashedPassword = await bcrypt.hash(password || "password123", 10);
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!password || !passwordRegex.test(password)) {
+      return res.status(400).json({ error: "Password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character." });
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // Generate Student ID: BRANCH-YEAR-SEQUENCE
     const branch = db.prepare("SELECT name FROM branches WHERE id = ?").get(branch_id) as any;
@@ -1118,8 +1335,15 @@ async function startServer() {
 
       const results = [];
       for (const record of records) {
-        const { full_name, email, phone, branch_id, program_id, program_degree, student_type } = record;
-        const hashedPassword = await bcrypt.hash("password123", 10);
+        const { full_name, email, phone, branch_id, program_id, program_degree, student_type, password } = record;
+        
+        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+        if (!password || !passwordRegex.test(password)) {
+          results.push({ email, status: 'error', error: "Password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character." });
+          continue;
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
 
         // Generate Student ID
         const branch = db.prepare("SELECT name FROM branches WHERE id = ?").get(branch_id) as any;
@@ -1147,7 +1371,8 @@ async function startServer() {
       logAction((req as any).user.id, "STUDENT_BULK_UPLOAD", { count: records.length });
       res.json({ results });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      console.error("[SERVER ERROR]", e);
+      res.status(500).json({ error: "An internal server error occurred. Please contact support." });
     } finally {
       if (req.file) fs.unlinkSync(req.file.path);
     }
@@ -1204,6 +1429,38 @@ async function startServer() {
     res.json(enrollments);
   });
 
+  // Student: My Courses with Instructors
+  app.get("/api/my-courses", authenticate, authorize(['student']), (req, res) => {
+    const user_id = (req as any).user.id;
+    
+    const coursesWithInstructors = db.prepare(`
+      SELECT 
+        e.id as enrollment_id,
+        e.status as enrollment_status,
+        e.grade,
+        c.id as course_id,
+        c.code as course_code,
+        c.title as course_title,
+        c.credits,
+        u_instructor.id as instructor_id,
+        u_instructor.full_name as instructor_name,
+        u_instructor.email as instructor_email,
+        cof.role as instructor_role,
+        sem.semester_name,
+        sem.academic_year
+      FROM enrollments e
+      JOIN courses c ON e.course_id = c.id
+      JOIN semesters sem ON e.semester_id = sem.id
+      LEFT JOIN course_offerings co ON co.course_id = c.id AND co.semester_id = e.semester_id
+      LEFT JOIN course_offerings_faculty cof ON cof.course_offering_id = co.id
+      LEFT JOIN users u_instructor ON cof.user_id = u_instructor.id
+      WHERE e.student_id = (SELECT id FROM students WHERE user_id = ?)
+      ORDER BY sem.start_date DESC, c.code
+    `).all(user_id);
+    
+    res.json(coursesWithInstructors);
+  });
+
   // Student Withdrawal
   app.post("/api/enrollments/withdraw", authenticate, authorize(['student']), (req, res) => {
     const { enrollment_id } = req.body;
@@ -1228,12 +1485,13 @@ async function startServer() {
   // Faculty Grade Entry
   app.post("/api/enrollments/grades", authenticate, authorize(['faculty', 'superadmin']), (req, res) => {
     const { enrollment_id, assignment_grade, midterm_grade, final_grade } = req.body;
-    
-    // Check if student is cleared for FINAL grade visibility (Optional: Business rule)
-    // Here we allow ENTRY, but we might restrict student viewing later.
 
-    const points = (assignment_grade * 0.2) + (midterm_grade * 0.3) + (final_grade * 0.5);
-    let grade = 'F';
+    // Grade validation
+    if ([assignment_grade, midterm_grade, final_grade].some(g => typeof g !== 'number' || g < 0 || g > 100)) {
+      return res.status(400).json({ error: "Invalid grade values. Must be numbers between 0 and 100." });
+    }
+
+    const points = (assignment_grade * 0.2) + (midterm_grade * 0.3) + (final_grade * 0.5);    let grade = 'F';
     if (points >= 90) grade = 'A';
     else if (points >= 80) grade = 'B';
     else if (points >= 70) grade = 'C';
@@ -1303,11 +1561,239 @@ async function startServer() {
     res.json({ isOpen: !!period, period: period || null });
   });
 
-  app.post("/api/registration-periods", authenticate, authorize(['superadmin']), (req, res) => {
-    const { branch_id, semester_id, start_date, end_date } = req.body;
-    db.prepare("INSERT INTO registration_periods (branch_id, semester_id, start_date, end_date) VALUES (?, ?, ?, ?)").run(branch_id, semester_id, start_date, end_date);
-    logAction((req as any).user.id, "REG_PERIOD_CREATE", { branch_id, semester_id });
-    res.json({ message: "Registration period defined" });
+  app.get("/api/registration-periods", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+    const { branch_id, role } = (req as any).user;
+    let periods;
+    if (role === 'superadmin') {
+      periods = db.prepare(`
+        SELECT rp.*, b.name as branch_name, s.semester_name 
+        FROM registration_periods rp 
+        LEFT JOIN branches b ON rp.branch_id = b.id 
+        LEFT JOIN semesters s ON rp.semester_id = s.id
+        ORDER BY rp.start_date DESC
+      `).all();
+    } else {
+      periods = db.prepare(`
+        SELECT rp.*, b.name as branch_name, s.semester_name 
+        FROM registration_periods rp 
+        LEFT JOIN branches b ON rp.branch_id = b.id 
+        LEFT JOIN semesters s ON rp.semester_id = s.id
+        WHERE rp.branch_id = ?
+        ORDER BY rp.start_date DESC
+      `).all(branch_id);
+    }
+    res.json(periods);
+  });
+
+  app.post("/api/registration-periods", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+    const { branch_id, semester_id, start_date, end_date, description, course_ids } = req.body;
+    const userBranchId = (req as any).user.role === 'branch_admin' ? (req as any).user.branch_id : branch_id;
+    const result = db.prepare("INSERT INTO registration_periods (branch_id, semester_id, start_date, end_date, description, course_ids) VALUES (?, ?, ?, ?, ?, ?)").run(
+      userBranchId || null, semester_id, start_date, end_date, description || null, course_ids ? JSON.stringify(course_ids) : null
+    );
+    logAction((req as any).user.id, "REG_PERIOD_CREATE", { semester_id, course_ids });
+    res.json({ id: result.lastInsertRowid, message: "Registration period defined" });
+  });
+
+  app.put("/api/registration-periods/:id/toggle", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+    const periodId = req.params.id;
+    const period = db.prepare("SELECT is_open FROM registration_periods WHERE id = ?").get(periodId) as any;
+    
+    if (period.is_open) {
+      db.prepare("UPDATE registration_periods SET is_open = 0 WHERE id = ?").run(periodId);
+    } else {
+      db.prepare("UPDATE registration_periods SET is_open = 0").run();
+      db.prepare("UPDATE registration_periods SET is_open = 1 WHERE id = ?").run(periodId);
+    }
+    
+    logAction((req as any).user.id, "REG_PERIOD_TOGGLE", { periodId });
+    res.json({ message: "Registration period status toggled" });
+  });
+
+  app.delete("/api/registration-periods/:id", authenticate, authorize(['superadmin', 'registrar']), (req, res) => {
+    db.prepare("DELETE FROM registration_periods WHERE id = ?").run(req.params.id);
+    logAction((req as any).user.id, "REG_PERIOD_DELETE", { periodId: req.params.id });
+    res.json({ message: "Registration period deleted" });
+  });
+
+  // Semester Registration System
+  // Check if student is registered for current semester
+  app.get("/api/semester-registration/status", authenticate, authorize(['student']), (req, res) => {
+    const userId = (req as any).user.id;
+    const student = db.prepare("SELECT id FROM students WHERE user_id = ?").get(userId) as any;
+    
+    if (!student) {
+      return res.json({ registered: false, message: "Student record not found" });
+    }
+
+    const activeSemester = db.prepare("SELECT id, semester_name, academic_year FROM semesters WHERE is_active = 1 ORDER BY id DESC LIMIT 1").get() as any;
+    
+    if (!activeSemester) {
+      return res.json({ registered: false, message: "No active semester", semester: null });
+    }
+
+    const registration = db.prepare("SELECT * FROM semester_registrations WHERE student_id = ? AND semester_id = ?").get(student.id, activeSemester.id) as any;
+    
+    res.json({
+      registered: !!registration,
+      status: registration?.status || null,
+      semester: activeSemester,
+      registrationDate: registration?.registration_date || null
+    });
+  });
+
+  // Student registers for current semester
+  app.post("/api/semester-registration/register", authenticate, authorize(['student']), (req, res) => {
+    const userId = (req as any).user.id;
+    const student = db.prepare("SELECT id FROM students WHERE user_id = ?").get(userId) as any;
+    
+    if (!student) {
+      return res.status(400).json({ error: "Student record not found" });
+    }
+
+    // Check if registration period is open
+    const period = db.prepare("SELECT * FROM registration_periods WHERE is_open = 1 ORDER BY id DESC LIMIT 1").get() as any;
+    
+    const activeSemester = db.prepare("SELECT id FROM semesters WHERE is_active = 1 ORDER BY id DESC LIMIT 1").get() as any;
+    
+    if (!activeSemester) {
+      return res.status(400).json({ error: "No active semester" });
+    }
+
+    // Check if already registered
+    const existing = db.prepare("SELECT id, status FROM semester_registrations WHERE student_id = ? AND semester_id = ?").get(student.id, activeSemester.id) as any;
+    
+    if (existing) {
+      if (existing.status === 'banned') {
+        return res.status(403).json({ error: "You have been banned from registration. Please visit the registrar's office." });
+      }
+      return res.status(400).json({ error: "Already registered for this semester", status: existing.status });
+    }
+
+    // If registration period is closed, mark as pending manual approval
+    const status = period ? 'registered' : 'pending_approval';
+    
+    const result = db.prepare("INSERT INTO semester_registrations (student_id, semester_id, status, notes) VALUES (?, ?, ?, ?)").run(
+      student.id, activeSemester.id, status, period ? null : "Registered after deadline - requires approval"
+    );
+
+    logAction(userId, "SEMESTER_REGISTRATION", { student_id: student.id, semester_id: activeSemester.id, status });
+    
+    res.json({ 
+      message: period ? "Successfully registered for semester!" : "Registration submitted - pending approval",
+      registrationId: result.lastInsertRowid,
+      status,
+      requiresApproval: !period
+    });
+  });
+
+  // Get all semester registrations (admin)
+  app.get("/api/semester-registrations", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+    const { branch_id, role } = (req as any).user;
+    const { semester_id, status } = req.query;
+    
+    let query = `
+      SELECT sr.*, s.full_name, s.student_id_code, s.contact_phone, s.branch_id,
+             sem.semester_name, sem.academic_year, u.full_name as approved_by_name
+      FROM semester_registrations sr
+      JOIN students s ON sr.student_id = s.id
+      JOIN semesters sem ON sr.semester_id = sem.id
+      LEFT JOIN users u ON sr.approved_by = u.id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    
+    if (role === 'branch_admin' || role === 'registrar') {
+      query += " AND s.branch_id = ?";
+      params.push(branch_id);
+    }
+    
+    if (semester_id) {
+      query += " AND sr.semester_id = ?";
+      params.push(semester_id);
+    }
+    
+    if (status) {
+      query += " AND sr.status = ?";
+      params.push(status);
+    }
+    
+    query += " ORDER BY sr.registration_date DESC";
+    
+    const registrations = db.prepare(query).all(...params);
+    res.json(registrations);
+  });
+
+  // Approve registration (registrar/admin)
+  app.put("/api/semester-registrations/:id/approve", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+    const { id } = req.params;
+    const userId = (req as any).user.id;
+    
+    db.prepare("UPDATE semester_registrations SET status = 'registered', approved_by = ?, registration_date = CURRENT_TIMESTAMP WHERE id = ?").run(userId, id);
+    
+    logAction(userId, "REGISTRATION_APPROVE", { registration_id: id });
+    res.json({ message: "Registration approved" });
+  });
+
+  // Ban student from registration
+  app.put("/api/semester-registrations/:id/ban", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const userId = (req as any).user.id;
+    
+    db.prepare("UPDATE semester_registrations SET status = 'banned', approved_by = ?, notes = ? WHERE id = ?").run(userId, reason || "Banned by admin", id);
+    
+    logAction(userId, "REGISTRATION_BAN", { registration_id: id, reason });
+    res.json({ message: "Student banned from registration" });
+  });
+
+  // Allow banned student to register (manual override)
+  app.put("/api/semester-registrations/:id/allow", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+    const { id } = req.params;
+    const userId = (req as any).user.id;
+    
+    db.prepare("UPDATE semester_registrations SET status = 'registered', approved_by = ? WHERE id = ?").run(userId, id);
+    
+    logAction(userId, "REGISTRATION_ALLOWED", { registration_id: id });
+    res.json({ message: "Student allowed to register" });
+  });
+
+  // Student requests late registration (after deadline)
+  app.post("/api/semester-registration/late-request", authenticate, authorize(['student']), (req, res) => {
+    const { reason } = req.body;
+    const userId = (req as any).user.id;
+    const student = db.prepare("SELECT id FROM students WHERE user_id = ?").get(userId) as any;
+    
+    if (!student) {
+      return res.status(400).json({ error: "Student record not found" });
+    }
+
+    const activeSemester = db.prepare("SELECT id FROM semesters WHERE is_active = 1 ORDER BY id DESC LIMIT 1").get() as any;
+    
+    if (!activeSemester) {
+      return res.status(400).json({ error: "No active semester" });
+    }
+
+    // Check if already has a pending or banned registration
+    const existing = db.prepare("SELECT id, status FROM semester_registrations WHERE student_id = ? AND semester_id = ?").get(student.id, activeSemester.id) as any;
+    
+    if (existing) {
+      if (existing.status === 'registered') {
+        return res.status(400).json({ error: "Already registered for this semester" });
+      }
+      // Update existing pending request
+      db.prepare("UPDATE semester_registrations SET status = 'pending_approval', notes = ? WHERE id = ?").run(`Late registration request: ${reason}`, existing.id);
+      logAction(userId, "LATE_REGISTRATION_REQUEST", { student_id: student.id, reason });
+      return res.json({ message: "Late registration request submitted" });
+    }
+
+    // Create new pending registration
+    db.prepare("INSERT INTO semester_registrations (student_id, semester_id, status, notes) VALUES (?, ?, 'pending_approval', ?)").run(
+      student.id, activeSemester.id, `Late registration request: ${reason}`
+    );
+    
+    logAction(userId, "LATE_REGISTRATION_REQUEST", { student_id: student.id, reason });
+    res.json({ message: "Late registration request submitted - pending approval" });
   });
 
 
@@ -1319,57 +1805,168 @@ async function startServer() {
 
   // Payment Verification
   app.post("/api/payments/verify", authenticate, authorize(['student']), async (req, res) => {
-  const { reference, last8Digits, student_id } = req.body;
+    const idempotencyKey = req.headers[IDEMPOTENCY_HEADER.toLowerCase()] as string | undefined;
 
-  const result = await cbeVerifier.verify(reference, last8Digits);
-
-  if (result.success) {
-    // Mark fee paid in database
-    db.prepare("INSERT INTO payments (student_id, amount, status, transaction_ref, payment_method) VALUES (?, ?, ?, ?, ?)").run(student_id, result.amount, 'verified', reference, 'cbe_receipt');
-    logAction((req as any).user.id, "PAYMENT_VERIFY", { reference, amount: result.amount });
-
-    // Get student details
-    const student = db.prepare(`
-      SELECT s.phone, s.full_name, u.email 
-      FROM students s 
-      JOIN users u ON s.user_id = u.id 
-      WHERE s.id = ?
-    `).get(student_id) as any;
-    
-    if (student) {
-      // Send SMS
-      try {
-        await afroMessage.sendSMS(
-          student.phone, 
-          `✅ Payment Confirmed!\n\nDear ${student.full_name},\nYour payment of ${result.amount} ETB has been verified successfully.\n\nRef: ${reference}\n\nThank you! - Dreamland College`
-        );
-        console.log(`✅ Payment SMS sent to ${student.phone}`);
-      } catch (smsError) {
-        console.error('❌ Payment SMS failed:', smsError);
+    // Check idempotency
+    const idempotencyCheck = await idempotencyService.checkAndLock(idempotencyKey, req.body);
+    if (idempotencyCheck.exists && idempotencyCheck.record) {
+      if (idempotencyCheck.processing) {
+        return res.status(409).json({ error: 'Request is already being processed' });
       }
-      
-      // Send Email
-      try {
-        await emailService.sendPaymentConfirmation(
-          student.email,
-          student.full_name,
-          result.amount,
-          reference
-        );
-        console.log(`✅ Payment email sent to ${student.email}`);
-      } catch (emailError) {
-        console.error('❌ Payment email failed:', emailError);
-      }
+      console.log(`[IDEMPOTENCY] Returning cached response for key: ${idempotencyKey}`);
+      return res.status(idempotencyCheck.record.response_status).json(JSON.parse(idempotencyCheck.record.response_body));
     }
 
-    res.json({ message: "Payment verified successfully", amount: result.amount });
-  } else {
-    res.status(400).json({ error: result.error });
-  }
-});
+    const { reference, last8Digits, student_id } = req.body;
+
+    // Strict type validation for input
+    if (!reference || typeof reference !== 'string') {
+      return res.status(400).json({ error: 'Reference number is required' });
+    }
+    if (!last8Digits || typeof last8Digits !== 'string' || last8Digits.length !== 8) {
+      return res.status(400).json({ error: 'Last 8 digits of account number are required' });
+    }
+    if (!student_id || typeof student_id !== 'number' || student_id <= 0) {
+      return res.status(400).json({ error: 'Valid student_id is required' });
+    }
+
+    const result = await cbeVerifier.verify(reference, last8Digits);
+
+    // STRICT: Only proceed with DB write if verification explicitly returns success=true
+    if (result.success === true) {
+      // Double-validate the verification signal
+      if (!isStrictVerificationSignal(result)) {
+        console.error('[PAYMENT VERIFY] Invalid verification signal - missing required fields');
+        const response = { error: 'Verification signal invalid' };
+        await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
+        return res.status(500).json(response);
+      }
+
+      // Validate payment insert data strictly
+      const paymentData = {
+        student_id,
+        amount: result.amount,
+        status: 'verified' as const,
+        transaction_ref: reference,
+        payment_method: 'cbe_receipt' as const
+      };
+      const validation = validatePaymentInsert(paymentData);
+      if (!validation.valid) {
+        console.error('[PAYMENT VERIFY] Payment data validation failed:', validation.error);
+        const response = { error: 'Invalid payment data' };
+        await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
+        return res.status(500).json(response);
+      }
+
+      try {
+        // STRICT: Wrap payment + ledger in atomic transaction
+        const userId = (req as any).user?.id || null;
+        const entryNumber = await db.transaction(async (client) => {
+          // Insert payment record
+          const paymentResult = await client.run(
+            "INSERT INTO payments (student_id, amount, status, transaction_ref, payment_method) VALUES (?, ?, 'verified', ?, 'cbe_receipt')",
+            [student_id, result.amount, reference]
+          );
+          const paymentId = Number(paymentResult.lastInsertRowid);
+
+          // Get ledger accounts
+          const bankAccount = await ledgerService.getAccountByCode('1100');
+          const tuitionRevenue = await ledgerService.getAccountByCode('4000');
+
+          if (!bankAccount || !tuitionRevenue) {
+            throw new Error('Required accounts not found. Please initialize ledger accounts.');
+          }
+
+          // Create journal entry
+          const journalResult = await client.run(
+            `INSERT INTO journal_entries (entry_number, date, description, reference_type, reference_id, status, posted_by, posted_at)
+             VALUES (?, datetime('now'), ?, 'payment', ?, 'pending', ?, datetime('now'))`,
+            [`JE-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`, 
+             `Student payment - Student ID: ${student_id}, Amount: ${result.amount} ETB, Method: cbe_receipt`, 
+             paymentId, userId]
+          );
+
+          const journalId = Number(journalResult.lastInsertRowid);
+
+          // Create debit entry (Bank)
+          await client.run(
+            `INSERT INTO journal_entry_lines (journal_entry_id, account_id, entry_type, amount, memo) VALUES (?, ?, ?, ?, ?)`,
+            [journalId, bankAccount.id, 'debit', result.amount, `Payment from student ${student_id}, ref: ${reference}`]
+          );
+
+          // Create credit entry (Tuition Revenue)
+          await client.run(
+            `INSERT INTO journal_entry_lines (journal_entry_id, account_id, entry_type, amount, memo) VALUES (?, ?, ?, ?, ?)`,
+            [journalId, tuitionRevenue.id, 'credit', result.amount, `Tuition payment from student ${student_id}`]
+          );
+
+          // Mark journal entry as posted
+          await client.run(
+            `UPDATE journal_entries SET status = 'posted' WHERE id = ?`,
+            [journalId]
+          );
+
+          return journalId;
+        });
+
+        console.log(`[PAYMENT VERIFY] Atomic transaction completed: Payment + Ledger entry created`);
+
+        logAction((req as any).user.id, "PAYMENT_VERIFY", { reference, amount: result.amount });
+
+        // Get student details
+        const student = db.prepare(`
+          SELECT s.phone, s.full_name, u.email 
+          FROM students s 
+          JOIN users u ON s.user_id = u.id 
+          WHERE s.id = ?
+        `).get(student_id) as any;
+        
+        if (student) {
+          // Send via SMS
+          if (student.contact_phone) {
+            try {
+              await afroMessage.sendSMS(
+                student.contact_phone, 
+                `✅ Payment Confirmed! Dear ${student.full_name}, your payment of ${result.amount} ETB has been verified. Ref: ${reference}. - Dreamland College`
+              );
+              console.log(`✅ Payment notification sent via SMS`);
+            } catch (smsError) {
+              console.error('❌ SMS notification failed:', smsError);
+            }
+          }
+          
+          // Send Email
+          try {
+            await emailService.sendPaymentConfirmation(
+              student.email,
+              student.full_name,
+              result.amount,
+              reference
+            );
+            console.log(`✅ Payment email sent to ${student.email}`);
+          } catch (emailError) {
+            console.error('❌ Payment email failed:', emailError);
+          }
+        }
+
+        const response = { message: "Payment verified successfully", amount: result.amount };
+        await idempotencyService.saveResponse(idempotencyKey || '', 200, response);
+        res.json(response);
+      } catch (dbError: unknown) {
+        console.error('[PAYMENT VERIFY] Database write failed:', dbError);
+        const response = { error: 'Failed to record payment' };
+        await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
+        res.status(500).json(response);
+      }
+    } else {
+      const response = { error: result.error };
+      await idempotencyService.saveResponse(idempotencyKey || '', 400, response);
+      res.status(400).json(response);
+    }
+  });
 
   // Academic Calendars
-  app.get("/api/academic-calendars", authenticate, (req, res) => {
+  app.get("/api/academic-calendars", authenticate, authorize(['superadmin', 'branch_admin', 'registrar', 'instructor', 'student', 'parent']), (req, res) => {
     const calendars = db.prepare(`
       SELECT ac.*, b.name as branch_name 
       FROM academic_calendars ac 
@@ -1381,9 +1978,9 @@ async function startServer() {
   // Integration Settings (Superadmin only) - Service Status
   app.get("/api/settings/integrations", authenticate, authorize(['superadmin']), (req, res) => {
     res.json({
-      afromessage: {
-        configured: !!process.env.AFROMESSAGE_API_KEY && process.env.AFROMESSAGE_API_KEY !== 'demo_key',
-        sender_id: process.env.AFROMESSAGE_SENDER_ID || 'Dreamland'
+      afroMessage: {
+        configured: !!process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'YOUR_TELEGRAM_BOT_TOKEN_HERE',
+        mock_mode: process.env.TELEGRAM_MOCK_MODE === 'true'
       },
       chapa: {
         configured: !!process.env.CHAPA_SECRET_KEY && !process.env.CHAPA_SECRET_KEY.includes('REPLACE'),
@@ -1401,14 +1998,57 @@ async function startServer() {
     });
   });
 
-  // File Upload
+  // Save Integration Settings (Superadmin only)
+  app.post("/api/settings/integrations", authenticate, authorize(['superadmin']), (req, res) => {
+    const { sms, email, payment } = req.body;
+    
+    try {
+      const saveSetting = (key: string, value: any) => {
+        const existing = db.prepare("SELECT id FROM system_settings WHERE setting_key = ?").get(key);
+        if (existing) {
+          db.prepare("UPDATE system_settings SET setting_value = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_key = ?").run(JSON.stringify(value), key);
+        } else {
+          db.prepare("INSERT INTO system_settings (setting_key, setting_value, category) VALUES (?, ?, ?)").run(key, JSON.stringify(value), 'integrations');
+        }
+      };
+
+      if (sms) saveSetting('sms_config', sms);
+      if (email) saveSetting('email_config', email);
+      if (payment) saveSetting('payment_config', payment);
+
+      res.json({ success: true, message: "Settings saved successfully" });
+    } catch (err: any) {
+      console.error("Failed to save settings:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Get System Settings (Superadmin only)
+  app.get("/api/settings/system", authenticate, authorize(['superadmin']), (req, res) => {
+    try {
+      const settings = db.prepare("SELECT setting_key, setting_value, category, updated_at FROM system_settings").all();
+      const settingsObj: any = {};
+      settings.forEach((s: any) => {
+        try {
+          settingsObj[s.setting_key] = JSON.parse(s.setting_value);
+        } catch {
+          settingsObj[s.setting_key] = s.setting_value;
+        }
+      });
+      res.json(settingsObj);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // File Upload (SECURITY: With file type validation)
   app.post("/api/upload", authenticate, upload.single("file"), (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    res.json({ url: `/uploads/${req.file.filename}` });
+    res.json({ url: `/uploads/${req.file.filename}`, mimetype: req.file.mimetype });
   });
   app.use("/uploads", express.static(uploadDir));
 
-  app.get("/api/programs", authenticate, (req, res) => {
+  app.get("/api/programs", authenticate, authorize(['superadmin', 'branch_admin', 'registrar', 'instructor', 'student', 'parent']), (req, res) => {
     const programs = db.prepare("SELECT * FROM programs").all();
     res.json(programs);
   });
@@ -1446,18 +2086,18 @@ async function startServer() {
     res.json({ enrollmentStats, paymentStats, programStats });
   });
 
-  // SMS Sending Endpoint (Real AfroMessage Integration)
-  app.post("/api/sms/send", authenticate, authorize(['superadmin', 'branch_admin', 'accountant']), async (req, res) => {
-    const { to, message } = req.body;
+  // SMS Message Endpoint
+  app.post("/api/sms/send", smsLimiter, authenticate, authorize(['superadmin', 'branch_admin', 'accountant']), async (req, res) => {
+    const { phone, message } = req.body;
 
-    if (!to || !message) {
+    if (!phone || !message) {
       return res.status(400).json({ error: 'Phone number and message are required' });
     }
 
-    const result = await afroMessage.sendSMS(to, message);
+    const result = await afroMessage.sendSMS(phone, message);
     
     if (result.success) {
-      logAction((req as any).user.id, "SMS_SENT", { to, messageId: result.messageId });
+      logAction((req as any).user.id, "SMS_SENT", { phone, messageId: result.messageId });
       res.json({ success: true, message: 'SMS sent successfully', messageId: result.messageId });
     } else {
       res.status(500).json({ success: false, error: result.error || 'Failed to send SMS' });
@@ -1465,21 +2105,17 @@ async function startServer() {
   });
 
   // Bulk SMS Endpoint
-  app.post("/api/sms/send-bulk", authenticate, authorize(['superadmin', 'branch_admin']), async (req, res) => {
-    const { phoneNumbers, message } = req.body;
+  app.post("/api/sms/send-bulk", smsLimiter, authenticate, authorize(['superadmin', 'branch_admin']), async (req, res) => {
+    const { phones, message } = req.body;
 
-    if (!Array.isArray(phoneNumbers) || !message) {
+    if (!Array.isArray(phones) || !message) {
       return res.status(400).json({ error: 'Phone numbers array and message are required' });
     }
 
-    const result = await afroMessage.sendBulkSMS(phoneNumbers, message);
+    const result = await afroMessage.sendBulkSMS(phones, message);
     
-    if (result.success) {
-      logAction((req as any).user.id, "BULK_SMS_SENT", { count: phoneNumbers.length });
-      res.json({ success: true, message: `SMS sent to ${phoneNumbers.length} recipients` });
-    } else {
-      res.status(500).json({ success: false, error: result.error || 'Failed to send bulk SMS' });
-    }
+    logAction((req as any).user.id, "BULK_SMS_SENT", { sent: result.sent, failed: result.failed });
+    res.json({ success: true, message: `SMS sent: ${result.sent} sent, ${result.failed} failed`, sent: result.sent, failed: result.failed });
   });
 
   // Chapa Payment Initialization (Real Integration)
@@ -1528,6 +2164,7 @@ async function startServer() {
   });
 
   // Chapa Payment Callback
+  // SECURITY: This endpoint verifies callbacks with Chapa API before updating payments
   app.get("/api/payments/callback", async (req, res) => {
     const { tx_ref, status } = req.query;
     
@@ -1537,46 +2174,94 @@ async function startServer() {
 
     const txRef = Array.isArray(tx_ref) ? tx_ref[0] : tx_ref;
 
-    // Verify payment with Chapa
+    if (typeof txRef !== 'string' || txRef.length === 0) {
+      return res.status(400).json({ error: 'Invalid transaction reference' });
+    }
+
+    // SECURITY: First verify tx_ref exists in our pending payments
+    const pendingPayment = db.prepare("SELECT * FROM payments WHERE transaction_ref = ? AND status = 'pending'").get(txRef) as any;
+    if (!pendingPayment) {
+      // tx_ref not found or not pending - may already be processed or invalid
+      console.log(`[CALLBACK] No pending payment found for tx_ref: ${txRef}`);
+      return res.redirect(`/payment-success?tx_ref=${txRef}&status=not_found`);
+    }
+
+    // SECURITY: Verify with Chapa API - this is the critical verification step
     const verification = await chapa.verifyPayment(txRef as string);
     
+    // STRICT: Only update database when Chapa explicitly confirms success
     if (verification.status === 'success' && verification.data?.status === 'success') {
+      // Strict validation of verification response
+      if (!verification.data || typeof verification.data.amount !== 'number' || verification.data.amount <= 0) {
+        console.error('[CHAPA CALLBACK] Invalid verification data:', verification.data);
+        return res.redirect(`/payment-success?tx_ref=${txRef}&status=failed`);
+      }
+
       // Update payment status in database
       const payment = db.prepare("SELECT * FROM payments WHERE transaction_ref = ?").get(txRef) as any;
       
       if (payment) {
-        db.prepare("UPDATE payments SET status = 'verified' WHERE transaction_ref = ?").run(txRef);
-        
-        // Get student details for notification
-        const student = db.prepare(`
-          SELECT s.phone, s.full_name, u.email
-          FROM students s
-          JOIN users u ON s.user_id = u.id
-          WHERE s.id = ?
-        `).get(payment.student_id) as any;
-
-        if (student) {
-          // Send SMS notification
-          await afroMessage.sendSMS(
-            student.phone,
-            `✅ Payment Confirmed!\n\nDear ${student.full_name},\nYour payment of ${verification.data.amount} ETB has been verified successfully.\n\nRef: ${txRef}\n\nThank you! - Dreamland College`
+        try {
+          // STRICT: Only write to DB after verified success signal from API
+          await db.strictWrite('UPDATE', 'payments',
+            "UPDATE payments SET status = 'verified' WHERE transaction_ref = ?",
+            [txRef]
           );
 
-          // Send email notification
-          await emailService.sendPaymentConfirmation(
-            student.email,
-            student.full_name,
+          // Record in accounting ledger (double-entry bookkeeping)
+          const ledgerResult = await ledgerService.recordPayment(
+            payment.student_id,
+            payment.id,
             verification.data.amount,
-            txRef
+            'chapa',
+            null
           );
-        }
 
-        logAction(null, "PAYMENT_VERIFIED", { tx_ref: String(txRef), amount: verification.data.amount });
+          if (!ledgerResult.success) {
+            console.error('[CHAPA CALLBACK] Ledger entry failed:', ledgerResult.error);
+          }
+          
+          // Get student details for notification
+          const student = db.prepare(`
+            SELECT s.contact_phone, s.full_name, u.email
+            FROM students s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.id = ?
+          `).get(payment.student_id) as any;
+
+          if (student) {
+            // Send SMS notification
+            if (student.contact_phone) {
+              try {
+                await afroMessage.sendSMS(
+                  student.contact_phone,
+                  `✅ Payment Confirmed! Dear ${student.full_name}, your payment of ${verification.data.amount} ETB has been verified. Ref: ${txRef}. - Dreamland College`
+                );
+              } catch (smsError) {
+                console.error('[CHAPA CALLBACK] SMS failed:', smsError);
+              }
+            }
+
+            // Send email notification
+            if (student.email) {
+              try {
+                await emailService.sendPaymentConfirmation(student.email, student.full_name, verification.data.amount, String(txRef));
+              } catch (emailError) {
+                console.error('[CHAPA CALLBACK] Email failed:', emailError);
+              }
+            }
+          }
+
+          logAction(null, "PAYMENT_VERIFIED", { tx_ref: String(txRef), amount: verification.data.amount, ledgerEntry: ledgerResult.entry_number });
+        } catch (dbError: unknown) {
+          console.error('[CHAPA CALLBACK] Database update failed:', dbError);
+        }
       }
 
       // Redirect to success page
       res.redirect(`/payment-success?tx_ref=${txRef}&status=success`);
     } else {
+      console.warn(`[CHAPA CALLBACK] Payment not verified: ${txRef}, status: ${verification.status}`);
       res.redirect(`/payment-success?tx_ref=${txRef}&status=failed`);
     }
   });
@@ -1592,40 +2277,85 @@ async function startServer() {
       return res.status(401).json({ error: 'Invalid signature' });
     }
 
-    const eventData = JSON.parse(payload);
+    let eventData: Record<string, unknown>;
+    try {
+      eventData = JSON.parse(payload);
+    } catch (parseError) {
+      console.error('[WEBHOOK] Failed to parse payload:', parseError);
+      return res.status(400).json({ error: 'Invalid JSON payload' });
+    }
     
+    // STRICT: Only proceed with verified success signal from webhook
     if (eventData.status === 'success') {
       const tx_ref = eventData.tx_ref;
       
+      // Strict validation of webhook data
+      if (typeof tx_ref !== 'string' || tx_ref.length === 0) {
+        console.error('[WEBHOOK] Missing or invalid tx_ref');
+        return res.json({ received: true });
+      }
+      
+      if (typeof eventData.amount !== 'number' || eventData.amount <= 0) {
+        console.error('[WEBHOOK] Missing or invalid amount');
+        return res.json({ received: true });
+      }
+
       // Update payment in database
       const payment = db.prepare("SELECT * FROM payments WHERE transaction_ref = ?").get(tx_ref) as any;
       
       if (payment && payment.status !== 'verified') {
-        db.prepare("UPDATE payments SET status = 'verified' WHERE transaction_ref = ?").run(tx_ref);
-        
-        // Get student details for notification
-        const student = db.prepare(`
-          SELECT s.phone, s.full_name, u.email
-          FROM students s
-          JOIN users u ON s.user_id = u.id
-          WHERE s.id = ?
-        `).get(payment.student_id) as any;
-
-        if (student) {
-          await afroMessage.sendSMS(
-            student.phone,
-            `✅ Payment Confirmed!\n\nDear ${student.full_name},\nYour payment of ${eventData.amount} ETB has been verified.\n\nRef: ${tx_ref}`
+        try {
+          // STRICT: Only write to DB after verified success signal
+          await db.strictWrite('UPDATE', 'payments',
+            "UPDATE payments SET status = 'verified' WHERE transaction_ref = ?",
+            [tx_ref]
           );
 
-          await emailService.sendPaymentConfirmation(
-            student.email,
-            student.full_name,
-            eventData.amount,
-            tx_ref
+          // Record in accounting ledger (double-entry bookkeeping)
+          const ledgerResult = await ledgerService.recordPayment(
+            payment.student_id,
+            payment.id,
+            eventData.amount as number,
+            'chapa',
+            null
           );
+
+          if (!ledgerResult.success) {
+            console.error('[WEBHOOK] Ledger entry failed:', ledgerResult.error);
+          }
+          
+          // Get student details for notification
+          const student = db.prepare(`
+            SELECT s.contact_phone, s.full_name, u.email
+            FROM students s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.id = ?
+          `).get(payment.student_id) as any;
+
+          if (student) {
+            if (student.contact_phone) {
+              try {
+                await afroMessage.sendSMS(
+                  student.contact_phone,
+                  `✅ Payment Confirmed! Dear ${student.full_name}, your payment of ${eventData.amount} ETB has been verified. Ref: ${tx_ref}. - Dreamland College`
+                );
+              } catch (smsError) {
+                console.error('[WEBHOOK] SMS failed:', smsError);
+              }
+            }
+            if (student.email) {
+              try {
+                await emailService.sendPaymentConfirmation(student.email, student.full_name, eventData.amount as number, tx_ref as string);
+              } catch (emailError) {
+                console.error('[WEBHOOK] Email failed:', emailError);
+              }
+            }
+          }
+
+          logAction(null, "PAYMENT_WEBHOOK_VERIFIED", { tx_ref, amount: eventData.amount, ledgerEntry: ledgerResult.entry_number });
+        } catch (dbError: unknown) {
+          console.error('[WEBHOOK] Database update failed:', dbError);
         }
-
-        logAction(null, "PAYMENT_WEBHOOK_VERIFIED", { tx_ref, amount: eventData.amount });
       }
     }
 
@@ -1634,6 +2364,18 @@ async function startServer() {
 
   // CBE Receipt Verification (Real Integration)
   app.post("/api/payments/verify-cbe", authenticate, async (req, res) => {
+    const idempotencyKey = req.headers[IDEMPOTENCY_HEADER.toLowerCase()] as string | undefined;
+
+    // Check idempotency
+    const idempotencyCheck = await idempotencyService.checkAndLock(idempotencyKey, req.body);
+    if (idempotencyCheck.exists && idempotencyCheck.record) {
+      if (idempotencyCheck.processing) {
+        return res.status(409).json({ error: 'Request is already being processed' });
+      }
+      console.log(`[IDEMPOTENCY] Returning cached response for key: ${idempotencyKey}`);
+      return res.status(idempotencyCheck.record.response_status).json(JSON.parse(idempotencyCheck.record.response_body));
+    }
+
     const { reference, last8Digits } = req.body;
     
     if (!reference || !last8Digits) {
@@ -1642,42 +2384,204 @@ async function startServer() {
 
     const result = await cbeVerifier.verify(reference, last8Digits);
     
-    if (result.success) {
+    // STRICT: Only proceed when verification explicitly returns success=true
+    if (result.success === true) {
+      // Double-validate the verification signal
+      if (!isStrictVerificationSignal(result)) {
+        console.error('[VERIFY-CBE] Invalid verification signal');
+        const response = { error: 'Verification signal invalid' };
+        await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
+        return res.status(500).json(response);
+      }
+
       const student = db.prepare("SELECT id FROM students WHERE user_id = ?").get((req as any).user.id) as any;
       
       if (student) {
-        db.prepare(`
-          INSERT INTO payments (student_id, amount, status, transaction_ref, payment_method)
-          VALUES (?, ?, 'verified', ?, 'cbe_receipt')
-        `).run(student.id, result.amount, reference);
+        // Validate payment insert data strictly
+        const paymentData = {
+          student_id: student.id,
+          amount: result.amount,
+          status: 'verified' as const,
+          transaction_ref: reference,
+          payment_method: 'cbe_receipt' as const
+        };
+        const validation = validatePaymentInsert(paymentData);
+        if (!validation.valid) {
+          console.error('[VERIFY-CBE] Payment data validation failed:', validation.error);
+          const response = { error: 'Invalid payment data' };
+          await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
+          return res.status(500).json(response);
+        }
 
-        // Get student details for notification
-        const studentDetails = db.prepare(`
-          SELECT s.phone, s.full_name, u.email
-          FROM students s
-          JOIN users u ON s.user_id = u.id
-          WHERE s.id = ?
-        `).get(student.id) as any;
-
-        if (studentDetails) {
-          await afroMessage.sendSMS(
-            studentDetails.phone,
-            `✅ Payment Confirmed!\n\nDear ${studentDetails.full_name},\nYour payment of ${result.amount} ETB has been verified successfully.\n\nRef: ${reference}\n\nThank you! - Dreamland College`
+        try {
+          // STRICT: Only write to DB after verified success signal
+          const paymentResult = await db.strictWrite('INSERT', 'payments',
+            "INSERT INTO payments (student_id, amount, status, transaction_ref, payment_method) VALUES (?, ?, 'verified', ?, 'cbe_receipt')",
+            [student.id, result.amount, reference]
           );
+          const paymentId = Number(paymentResult.lastInsertRowid);
 
-          await emailService.sendPaymentConfirmation(
-            studentDetails.email,
-            studentDetails.full_name,
+          // Record in accounting ledger (double-entry bookkeeping)
+          const ledgerResult = await ledgerService.recordPayment(
+            student.id,
+            paymentId,
             result.amount,
-            reference
+            'cbe_receipt',
+            (req as any).user?.id || null
           );
+
+          if (!ledgerResult.success) {
+            console.error('[VERIFY-CBE] Ledger entry failed:', ledgerResult.error);
+          }
+
+          // Get student details for notification
+          const studentDetails = db.prepare(`
+            SELECT s.contact_phone, s.full_name, u.email
+            FROM students s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.id = ?
+          `).get(student.id) as any;
+
+          if (studentDetails) {
+            if (studentDetails.contact_phone) {
+              try {
+                await afroMessage.sendSMS(
+                  studentDetails.contact_phone,
+                  `✅ Payment Confirmed! Dear ${studentDetails.full_name}, your payment of ${result.amount} ETB has been verified. Ref: ${reference}. - Dreamland College`
+                );
+              } catch (smsError) {
+                console.error('[VERIFY-CBE] SMS failed:', smsError);
+              }
+            }
+            if (studentDetails.email) {
+              try {
+                await emailService.sendPaymentConfirmation(studentDetails.email, studentDetails.full_name, result.amount, reference);
+              } catch (emailError) {
+                console.error('[VERIFY-CBE] Email failed:', emailError);
+              }
+            }
+          }
+
+          logAction((req as any).user.id, "PAYMENT_CBE_VERIFIED", { reference, amount: result.amount, paymentId, ledgerEntry: ledgerResult.entry_number });
+          const response = { verified: true, amount: result.amount, date: result.date, paymentId, ledgerEntry: ledgerResult.entry_number };
+          await idempotencyService.saveResponse(idempotencyKey || '', 200, response);
+          return res.json(response);
+        } catch (dbError: unknown) {
+          console.error('[VERIFY-CBE] Database write failed:', dbError);
+          const response = { error: 'Failed to record payment' };
+          await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
+          return res.status(500).json(response);
         }
       }
 
       logAction((req as any).user.id, "PAYMENT_CBE_VERIFIED", { reference, amount: result.amount });
-      res.json({ verified: true, amount: result.amount, date: result.date });
+      const response = { verified: true, amount: result.amount, date: result.date };
+      await idempotencyService.saveResponse(idempotencyKey || '', 200, response);
+      res.json(response);
     } else {
-      res.status(400).json({ verified: false, error: result.error });
+      const response = { verified: false, error: result.error };
+      await idempotencyService.saveResponse(idempotencyKey || '', 400, response);
+      res.status(400).json(response);
+    }
+  });
+
+  // CBE Receipt Upload Verification (OCR-based)
+  app.post("/api/payments/verify-cbe-receipt", authenticate, async (req, res) => {
+    const { imageBase64, expectedAmount } = req.body;
+    
+    if (!imageBase64) {
+      return res.status(400).json({ error: 'Receipt image is required' });
+    }
+
+    try {
+      const student = db.prepare("SELECT id, full_name FROM students WHERE user_id = ?").get((req as any).user.id) as any;
+      const user = db.prepare("SELECT full_name FROM users WHERE id = ?").get((req as any).user.id) as any;
+      const studentName = student?.full_name || user?.full_name || '';
+
+      const result = await cbeVerifier.verifyFromReceipt(imageBase64, expectedAmount, studentName);
+      
+      // STRICT: Only proceed with DB write when verification explicitly returns success=true
+      if (result.success === true) {
+        // Validate the verification signal
+        if (!result.reference || typeof result.reference !== 'string' || result.reference.length === 0) {
+          console.error('[VERIFY-CBE-RECEIPT] Invalid verification signal - missing reference');
+          return res.status(500).json({ error: 'Verification signal invalid' });
+        }
+
+        if (typeof result.amount !== 'number' || result.amount <= 0) {
+          console.error('[VERIFY-CBE-RECEIPT] Invalid verification signal - invalid amount');
+          return res.status(500).json({ error: 'Verification signal invalid' });
+        }
+
+        if (student) {
+          // Validate payment insert data strictly
+          const paymentData = {
+            student_id: student.id,
+            amount: result.amount,
+            status: 'verified' as const,
+            transaction_ref: result.reference,
+            payment_method: 'cbe_receipt' as const
+          };
+          const validation = validatePaymentInsert(paymentData);
+          if (!validation.valid) {
+            console.error('[VERIFY-CBE-RECEIPT] Payment data validation failed:', validation.error);
+            return res.status(500).json({ error: 'Invalid payment data' });
+          }
+
+          try {
+            // STRICT: Only write to DB after verified success signal
+            await db.strictWrite('INSERT', 'payments',
+              "INSERT INTO payments (student_id, amount, status, transaction_ref, payment_method) VALUES (?, ?, 'verified', ?, 'cbe_receipt')",
+              [student.id, result.amount, result.reference]
+            );
+
+            const studentDetails = db.prepare(`
+              SELECT s.contact_phone, u.full_name, u.email
+              FROM students s
+              JOIN users u ON s.user_id = u.id
+              WHERE s.id = ?
+            `).get(student.id) as any;
+
+            if (studentDetails) {
+              if (studentDetails.contact_phone) {
+                try {
+                  await afroMessage.sendSMS(
+                    studentDetails.contact_phone,
+                    `✅ Payment Confirmed! Dear ${studentDetails.full_name}, your payment of ${result.amount} ETB has been verified. Ref: ${result.reference}. - Dreamland College`
+                  );
+                } catch (smsError) {
+                  console.error('[VERIFY-CBE-RECEIPT] SMS failed:', smsError);
+                }
+              }
+              if (studentDetails.email) {
+                try {
+                  await emailService.sendPaymentConfirmation(studentDetails.email, studentDetails.full_name, result.amount, result.reference || 'N/A');
+                } catch (emailError) {
+                  console.error('[VERIFY-CBE-RECEIPT] Email failed:', emailError);
+                }
+              }
+            }
+          } catch (dbError: unknown) {
+            console.error('[VERIFY-CBE-RECEIPT] Database write failed:', dbError);
+            return res.status(500).json({ error: 'Failed to record payment' });
+          }
+        }
+
+        logAction((req as any).user.id, "PAYMENT_CBE_RECEIPT_VERIFIED", { reference: result.reference, amount: result.amount });
+        res.json({ 
+          verified: true, 
+          amount: result.amount, 
+          date: result.date,
+          reference: result.reference,
+          payerName: result.payerName
+        });
+      } else {
+        res.status(400).json({ verified: false, error: result.error });
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('❌ Receipt verification error:', errorMessage);
+      res.status(500).json({ error: 'Failed to verify receipt: ' + errorMessage });
     }
   });
 
@@ -1688,8 +2592,9 @@ async function startServer() {
   // --- Password Change (Authenticated) ---
   app.post("/api/auth/change-password", authenticate, async (req, res) => {
     const { old_password, new_password } = req.body;
-    if (!old_password || !new_password || new_password.length < 6) {
-      return res.status(400).json({ error: "New password must be at least 6 characters" });
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!old_password || !new_password || !passwordRegex.test(new_password)) {
+      return res.status(400).json({ error: "New password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character." });
     }
     const user = db.prepare("SELECT * FROM users WHERE id = ?").get((req as any).user.id) as any;
     if (!user || !await bcrypt.compare(old_password, user.password)) {
@@ -1717,9 +2622,9 @@ async function startServer() {
       try {
         await afroMessage.sendSMS(
           student.contact_phone, 
-          `🔐 Dreamland College Password Reset\n\nYour reset code is: ${token}\n\nValid for 1 hour.\n\nIf you didn't request this, contact support immediately.`
+          `Dreamland College: Your password reset code is ${token}. Valid for 1 hour. If you didn't request this, ignore.`
         );
-        console.log(`✅ SMS sent to ${student.contact_phone}`);
+        console.log(`✅ Password reset sent via SMS`);
       } catch (smsError) {
         console.error('❌ SMS failed:', smsError);
       }
@@ -1728,32 +2633,26 @@ async function startServer() {
     // Send via Email
     try {
       await emailService.sendPasswordResetEmail(email, token, user.full_name || 'User');
-      console.log(`✅ Email sent to ${email}`);
+      console.log(`✅ Password reset email sent to: ${email.substring(0, 3)}***@***`);
     } catch (emailError) {
-      console.error('❌ Email failed:', emailError);
+      console.error('❌ Password reset email failed:', emailError);
     }
     
-    // Also log to console for testing
-    console.log(`\n🔑 PASSWORD RESET CODE\n━━━━━━━━━━━━━━━━━━━━━`);
-    console.log(`📧 Email: ${email}`);
-    console.log(`👤 User: ${user.full_name}`);
-    console.log(`🔢 Code: ${token}`);
-    console.log(`⏰ Expires: ${expiresAt}`);
-    console.log(`━━━━━━━━━━━━━━━━━━━━━\n`);
+    // SECURITY: Never expose tokens in responses or logs
+    console.log(`Password reset code requested for: ${email.substring(0, 3)}***@*** (User: ${user.full_name || 'Unknown'})`);
     
-    logAction(null, "PASSWORD_RESET_REQUEST", { email, userId: user.id });
+    logAction(null, "PASSWORD_RESET_REQUEST", { email: email.substring(0, 3) + '***', userId: user.id });
     res.json({ 
-      message: "If the email exists, a reset code has been sent.",
-      // In production, remove this debug info
-      debug: process.env.NODE_ENV === 'development' ? { code: token } : undefined
+      message: "If the email exists, a reset code has been sent."
     });
   });
 
   // --- Password Reset Confirm ---
   app.post("/api/auth/reset-password", async (req, res) => {
     const { email, token, new_password } = req.body;
-    if (!new_password || new_password.length < 6) {
-      return res.status(400).json({ error: "New password must be at least 6 characters" });
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!new_password || !passwordRegex.test(new_password)) {
+      return res.status(400).json({ error: "New password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character." });
     }
     const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
     if (!user) return res.status(400).json({ error: "Invalid request" });
@@ -1767,23 +2666,104 @@ async function startServer() {
   });
 
   // --- Student Update (PUT) ---
-  app.put("/api/students/:id", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+  app.put("/api/students/:id", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), async (req, res) => {
     const studentId = req.params.id;
-    const { full_name, birth_year, birth_place_region, birth_place_zone, birth_place_woreda, birth_place_kebele, contact_phone, emergency_contact_name, emergency_contact_phone, student_type, program_id, program_degree, academic_status, status } = req.body;
+
+    // Strict validation of student ID
+    if (!studentId || typeof studentId !== 'string' || studentId.length === 0) {
+      return res.status(400).json({ error: 'Valid student ID is required' });
+    }
+
+    // Validate request body with strict type checking
+    const validation = validateStudentUpdate(req.body);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
+    }
+
+    const { full_name, fields } = validation.sanitized!;
+    const { birth_year, birth_place_region, birth_place_zone, birth_place_woreda, birth_place_kebele, contact_phone, emergency_contact_name, emergency_contact_phone, student_type, program_id, program_degree, academic_status } = fields;
+
     try {
-      db.prepare(`UPDATE students SET birth_year = ?, birth_place_region = ?, birth_place_zone = ?, birth_place_woreda = ?, birth_place_kebele = ?, contact_phone = ?, emergency_contact_name = ?, emergency_contact_phone = ?, student_type = ?, program_id = ?, program_degree = ?, academic_status = ? WHERE id = ?`).run(
-        birth_year, birth_place_region, birth_place_zone, birth_place_woreda, birth_place_kebele, contact_phone, emergency_contact_name, emergency_contact_phone, student_type, program_id, program_degree, academic_status || 'good_standing', studentId
-      );
-      if (full_name) {
+      // Build the UPDATE query dynamically based on provided fields
+      const updateFields: string[] = [];
+      const updateValues: unknown[] = [];
+
+      if (birth_year !== undefined) {
+        updateFields.push('birth_year = ?');
+        updateValues.push(birth_year);
+      }
+      if (birth_place_region !== undefined) {
+        updateFields.push('birth_place_region = ?');
+        updateValues.push(birth_place_region);
+      }
+      if (birth_place_zone !== undefined) {
+        updateFields.push('birth_place_zone = ?');
+        updateValues.push(birth_place_zone);
+      }
+      if (birth_place_woreda !== undefined) {
+        updateFields.push('birth_place_woreda = ?');
+        updateValues.push(birth_place_woreda);
+      }
+      if (birth_place_kebele !== undefined) {
+        updateFields.push('birth_place_kebele = ?');
+        updateValues.push(birth_place_kebele);
+      }
+      if (contact_phone !== undefined) {
+        updateFields.push('contact_phone = ?');
+        updateValues.push(contact_phone);
+      }
+      if (emergency_contact_name !== undefined) {
+        updateFields.push('emergency_contact_name = ?');
+        updateValues.push(emergency_contact_name);
+      }
+      if (emergency_contact_phone !== undefined) {
+        updateFields.push('emergency_contact_phone = ?');
+        updateValues.push(emergency_contact_phone);
+      }
+      if (student_type !== undefined) {
+        updateFields.push('student_type = ?');
+        updateValues.push(student_type);
+      }
+      if (program_id !== undefined) {
+        updateFields.push('program_id = ?');
+        updateValues.push(program_id);
+      }
+      if (program_degree !== undefined) {
+        updateFields.push('program_degree = ?');
+        updateValues.push(program_degree);
+      }
+      if (academic_status !== undefined) {
+        updateFields.push('academic_status = ?');
+        updateValues.push(academic_status);
+      }
+
+      // Only update if there are fields to update
+      if (updateFields.length > 0) {
+        updateValues.push(studentId);
+        const updateSql = `UPDATE students SET ${updateFields.join(', ')} WHERE id = ?`;
+        
+        // STRICT: Use strictWrite for audit trail
+        await db.strictWrite('UPDATE', 'students', updateSql, updateValues);
+      }
+
+      // Update full_name in users table if provided
+      if (full_name && typeof full_name === 'string' && full_name.length > 0) {
         const student = db.prepare("SELECT user_id FROM students WHERE id = ?").get(studentId) as any;
         if (student) {
-          db.prepare("UPDATE users SET full_name = ? WHERE id = ?").run(full_name, student.user_id);
+          // Strict validation for user name update
+          await db.strictWrite('UPDATE', 'users',
+            "UPDATE users SET full_name = ? WHERE id = ?",
+            [full_name, student.user_id]
+          );
         }
       }
+
       logAction((req as any).user.id, "STUDENT_UPDATE", { studentId });
       res.json({ message: "Student updated successfully" });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : 'Unknown error';
+      console.error('[STUDENT UPDATE] Database write failed:', errorMessage);
+      res.status(400).json({ error: errorMessage });
     }
   });
 
@@ -1871,16 +2851,45 @@ async function startServer() {
   });
 
   app.post("/api/courses", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
-    const { code, title, credits, prerequisites, is_auditable } = req.body;
-    const result = db.prepare("INSERT INTO courses (code, title, credits, prerequisites, is_auditable) VALUES (?, ?, ?, ?, ?)").run(code, title, credits, prerequisites || null, is_auditable ? 1 : 0);
-    logAction((req as any).user.id, "COURSE_CREATE", { code, title });
-    res.json({ id: result.lastInsertRowid, message: "Course created" });
+    const { code, title, credits, prerequisites, is_auditable, program, price_per_credit } = req.body;
+    try {
+      const result = db.prepare("INSERT INTO courses (code, title, credits, prerequisites, is_auditable, program, price_per_credit) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        code, title, credits, prerequisites || null, is_auditable ? 1 : 0, program || null, price_per_credit || 0
+      );
+      logAction((req as any).user.id, "COURSE_CREATE", { code, title });
+      res.json({ id: result.lastInsertRowid, message: "Course created" });
+    } catch (e: any) {
+      // Handle case where new columns don't exist yet
+      if (e.message.includes('no such column')) {
+        const result = db.prepare("INSERT INTO courses (code, title, credits, prerequisites, is_auditable) VALUES (?, ?, ?, ?, ?)").run(
+          code, title, credits, prerequisites || null, is_auditable ? 1 : 0
+        );
+        logAction((req as any).user.id, "COURSE_CREATE", { code, title });
+        res.json({ id: result.lastInsertRowid, message: "Course created (legacy mode)" });
+      } else {
+        throw e;
+      }
+    }
   });
 
   app.put("/api/courses/:id", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
-    const { code, title, credits, prerequisites, is_auditable } = req.body;
-    db.prepare("UPDATE courses SET code = ?, title = ?, credits = ?, prerequisites = ?, is_auditable = ? WHERE id = ?").run(code, title, credits, prerequisites || null, is_auditable ? 1 : 0, req.params.id);
-    res.json({ message: "Course updated" });
+    const { code, title, credits, prerequisites, is_auditable, program, price_per_credit } = req.body;
+    try {
+      db.prepare("UPDATE courses SET code = ?, title = ?, credits = ?, prerequisites = ?, is_auditable = ?, program = ?, price_per_credit = ? WHERE id = ?").run(
+        code, title, credits, prerequisites || null, is_auditable ? 1 : 0, program || null, price_per_credit || 0, req.params.id
+      );
+      res.json({ message: "Course updated" });
+    } catch (e: any) {
+      // Handle case where new columns don't exist yet
+      if (e.message.includes('no such column')) {
+        db.prepare("UPDATE courses SET code = ?, title = ?, credits = ?, prerequisites = ?, is_auditable = ? WHERE id = ?").run(
+          code, title, credits, prerequisites || null, is_auditable ? 1 : 0, req.params.id
+        );
+        res.json({ message: "Course updated (legacy mode)" });
+      } else {
+        throw e;
+      }
+    }
   });
 
   app.delete("/api/courses/:id", authenticate, authorize(['superadmin']), (req, res) => {
@@ -2028,15 +3037,69 @@ async function startServer() {
 
   // --- LMS: Course Materials ---
   app.get("/api/courses/:id/materials", authenticate, (req, res) => {
-    const materials = db.prepare("SELECT * FROM course_materials WHERE course_offering_id = ? ORDER BY uploaded_at DESC").all(req.params.id);
-    res.json(materials);
+    const materials = db.prepare(`
+      SELECT cm.*, u.full_name as uploaded_by
+      FROM course_materials cm
+      LEFT JOIN users u ON cm.uploaded_by = u.id
+      WHERE cm.course_offering_id = ?
+      ORDER BY cm.uploaded_at DESC
+    `).all(req.params.id);
+    
+    // Add file metadata
+    const materialsWithMeta = materials.map((m: any) => {
+      const filePath = path.join(__dirname, m.file_url);
+      let fileSize = 0;
+      let fileType = 'application/octet-stream';
+      
+      if (fs.existsSync(filePath)) {
+        const stats = fs.statSync(filePath);
+        fileSize = stats.size;
+        
+        // Detect file type based on extension
+        const ext = filePath.split('.').pop()?.toLowerCase();
+        const mimeTypes: Record<string, string> = {
+          'pdf': 'application/pdf',
+          'doc': 'application/msword',
+          'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'ppt': 'application/vnd.ms-powerpoint',
+          'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'xls': 'application/vnd.ms-excel',
+          'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'jpg': 'image/jpeg',
+          'jpeg': 'image/jpeg',
+          'png': 'image/png',
+          'gif': 'image/gif',
+          'mp4': 'video/mp4',
+          'mp3': 'audio/mpeg',
+          'zip': 'application/zip',
+          'rar': 'application/vnd.rar'
+        };
+        fileType = mimeTypes[ext || ''] || 'application/octet-stream';
+      }
+      
+      return {
+        ...m,
+        file_size: fileSize,
+        file_type: fileType
+      };
+    });
+    
+    res.json(materialsWithMeta);
   });
 
   app.post("/api/courses/:id/materials", authenticate, authorize(['faculty', 'superadmin']), upload.single("file"), (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    const { title } = req.body;
-    db.prepare("INSERT INTO course_materials (course_offering_id, title, file_url) VALUES (?, ?, ?)").run(req.params.id, title, `/uploads/${req.file.filename}`);
-    res.json({ message: "Material uploaded successfully" });
+    const { title, description } = req.body;
+    const result = db.prepare("INSERT INTO course_materials (course_offering_id, title, description, file_url, uploaded_by) VALUES (?, ?, ?, ?, ?)").run(
+      req.params.id, title, description || '', `/uploads/${req.file.filename}`, (req as any).user.id
+    );
+    res.json({ 
+      id: result.lastInsertRowid, 
+      message: "Material uploaded successfully",
+      file_url: `/uploads/${req.file.filename}`,
+      file_size: req.file.size,
+      file_type: req.file.mimetype
+    });
   });
 
   // --- LMS: Assignments ---
@@ -2154,27 +3217,96 @@ async function startServer() {
   });
 
   // --- User Management ---
-  app.get("/api/users", authenticate, authorize(['superadmin']), (req, res) => {
-    const users = db.prepare("SELECT id, username, role, full_name, email, branch_id FROM users").all();
+  app.get("/api/users", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
+    const { role, branch_id } = (req as any).user;
+    let users;
+    if (role === 'superadmin') {
+      users = db.prepare("SELECT id, username, role, full_name, email, branch_id FROM users WHERE role != 'superadmin'").all();
+    } else {
+      // Branch admin can see users in their branch
+      users = db.prepare("SELECT id, username, role, full_name, email, branch_id FROM users WHERE branch_id = ? AND role != 'superadmin'").all(branch_id);
+    }
     res.json(users);
   });
 
-  app.post("/api/users", authenticate, authorize(['superadmin']), async (req, res) => {
+  app.get("/api/users/faculty", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
+    const { branch_id } = (req as any).user;
+    let users;
+    if ((req as any).user.role === 'superadmin') {
+      users = db.prepare("SELECT id, username, role, full_name, email, branch_id FROM users WHERE role = 'faculty'").all();
+    } else {
+      users = db.prepare("SELECT id, username, role, full_name, email, branch_id FROM users WHERE role = 'faculty' AND branch_id = ?").all(branch_id);
+    }
+    res.json(users);
+  });
+
+  app.post("/api/users", authenticate, authorize(['superadmin', 'branch_admin']), async (req, res) => {
     const { username, password, role, full_name, email, branch_id } = req.body;
-    const hashed = await bcrypt.hash(password || "password123", 10);
+    const currentUser = (req as any).user;
+    
+    // Validation: Branch admin can only create accountant and faculty
+    if (currentUser.role === 'branch_admin') {
+      if (!['accountant', 'faculty'].includes(role)) {
+        return res.status(403).json({ error: 'Branch admin can only create accountant or faculty accounts' });
+      }
+      // Branch admin can only assign to their own branch
+      if (branch_id && branch_id !== currentUser.branch_id) {
+        return res.status(403).json({ error: 'Branch admin can only assign to their branch' });
+      }
+    }
+    
+    // Superadmin can also promote user to branch_admin
+    if (role === 'branch_admin' && currentUser.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only superadmin can create branch admin accounts' });
+    }
+
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!password || !passwordRegex.test(password)) {
+      return res.status(400).json({ error: "Password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character." });
+    }
+    const hashed = await bcrypt.hash(password, 10);
     try {
-      const result = db.prepare("INSERT INTO users (username, password, role, full_name, email, branch_id) VALUES (?, ?, ?, ?, ?, ?)").run(username, hashed, role, full_name, email, branch_id || null);
-      logAction((req as any).user.id, "USER_CREATE", { username, role });
+      const userBranchId = currentUser.role === 'branch_admin' ? currentUser.branch_id : branch_id;
+      const result = db.prepare("INSERT INTO users (username, password, role, full_name, email, branch_id) VALUES (?, ?, ?, ?, ?, ?)").run(username, hashed, role, full_name, email, userBranchId || null);
+      logAction(currentUser.id, "USER_CREATE", { username, role, createdBy: currentUser.role });
       res.json({ id: result.lastInsertRowid, message: "User created" });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  app.put("/api/users/:id", authenticate, authorize(['superadmin']), (req, res) => {
+  app.put("/api/users/:id/role", authenticate, authorize(['superadmin']), async (req, res) => {
+    const { role, branch_id } = req.body;
+    const targetUserId = parseInt(req.params.id);
+    
+    // Get current user info to check if promoting to branch_admin
+    const targetUser = db.prepare("SELECT role FROM users WHERE id = ?").get(targetUserId) as any;
+    
+    if (role === 'branch_admin') {
+      if (!branch_id) {
+        return res.status(400).json({ error: 'Branch ID is required for branch admin role' });
+      }
+    }
+    
+    db.prepare("UPDATE users SET role = ?, branch_id = ? WHERE id = ?").run(role, branch_id || null, targetUserId);
+    logAction((req as any).user.id, "USER_PROMOTE", { targetUserId, newRole: role });
+    res.json({ message: "User role updated" });
+  });
+
+  app.put("/api/users/:id", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
     const { full_name, email, role, branch_id } = req.body;
-    db.prepare("UPDATE users SET full_name = ?, email = ?, role = ?, branch_id = ? WHERE id = ?").run(full_name, email, role, branch_id || null, req.params.id);
-    logAction((req as any).user.id, "USER_UPDATE", { userId: req.params.id });
+    const currentUser = (req as any).user;
+    
+    // Branch admin cannot change role to branch_admin or superadmin
+    if (currentUser.role === 'branch_admin') {
+      if (role === 'branch_admin' || role === 'superadmin') {
+        return res.status(403).json({ error: 'Insufficient permissions to assign this role' });
+      }
+    }
+    
+    const userBranchId = currentUser.role === 'branch_admin' ? currentUser.branch_id : branch_id;
+    db.prepare("UPDATE users SET full_name = ?, email = ?, role = ?, branch_id = ? WHERE id = ?").run(full_name, email, role, userBranchId || null, req.params.id);
+    logAction(currentUser.id, "USER_UPDATE", { userId: req.params.id });
     res.json({ message: "User updated" });
   });
 
@@ -2199,9 +3331,30 @@ async function startServer() {
     res.json({ message: "All notifications marked as read" });
   });
 
-  app.post("/api/notifications/send", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
-    const { user_id, title, message } = req.body;
-    db.prepare("INSERT INTO notifications (user_id, title, message) VALUES (?, ?, ?)").run(user_id, title, message);
+  app.post("/api/notifications/send", authenticate, authorize(['superadmin', 'branch_admin', 'faculty']), (req, res) => {
+    const { user_id, role, title, message } = req.body;
+    
+    if (user_id) {
+      db.prepare("INSERT INTO notifications (user_id, title, message) VALUES (?, ?, ?)").run(user_id, title, message);
+    } else if (role) {
+      let users;
+      if (role === 'all') {
+        users = db.prepare("SELECT id FROM users").all();
+      } else if (role === 'staff') {
+        users = db.prepare("SELECT id FROM users WHERE role IN ('superadmin', 'branch_admin', 'faculty', 'accountant', 'registrar')").all();
+      } else {
+        users = db.prepare("SELECT id FROM users WHERE role = ?").all(role);
+      }
+      
+      const stmt = db.prepare("INSERT INTO notifications (user_id, title, message) VALUES (?, ?, ?)");
+      const insertMany = db.transaction((userList) => {
+        for (const user of userList) stmt.run(user.id, title, message);
+      });
+      insertMany(users);
+    } else {
+      return res.status(400).json({ error: "user_id or role is required" });
+    }
+    
     res.json({ message: "Notification sent" });
   });
 
@@ -2253,6 +3406,106 @@ async function startServer() {
     res.json(payments);
   });
 
+  // --- Ledger Trial Balance ---
+  app.get("/api/ledger/trial-balance", authenticate, authorize(['superadmin', 'accountant']), async (req, res) => {
+    try {
+      const balances = await ledgerService.getTrialBalance();
+      const integrity = await ledgerService.validateLedgerIntegrity();
+      res.json({
+        balances,
+        integrity: {
+          valid: integrity.valid,
+          errors: integrity.errors
+        },
+        generatedAt: new Date().toISOString()
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[LEDGER] Trial balance error:', errorMessage);
+      res.status(500).json({ error: 'Failed to generate trial balance' });
+    }
+  });
+
+  // --- Ledger Journal Entries ---
+  app.get("/api/ledger/entries", authenticate, authorize(['superadmin', 'accountant']), async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = (page - 1) * limit;
+
+      const entries = await db.all(
+        `SELECT je.*, u.full_name as posted_by_name
+         FROM journal_entries je
+         LEFT JOIN users u ON je.posted_by = u.id
+         WHERE je.status = 'posted'
+         ORDER BY je.date DESC
+         LIMIT ? OFFSET ?`,
+        [limit, offset]
+      );
+
+      const total = (await db.get<{ count: number }>('SELECT COUNT(*) as count FROM journal_entries WHERE status = ?', ['posted']))?.count || 0;
+
+      res.json({
+        entries,
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[LEDGER] Journal entries error:', errorMessage);
+      res.status(500).json({ error: 'Failed to fetch journal entries' });
+    }
+  });
+
+  // --- Ledger Journal Entry Detail ---
+  app.get("/api/ledger/entries/:id", authenticate, authorize(['superadmin', 'accountant']), async (req, res) => {
+    try {
+      const entryId = parseInt(req.params.id);
+      if (isNaN(entryId)) {
+        return res.status(400).json({ error: 'Invalid entry ID' });
+      }
+
+      const entry = await ledgerService.getJournalEntry(entryId);
+      if (!entry) {
+        return res.status(404).json({ error: 'Journal entry not found' });
+      }
+
+      const lines = await ledgerService.getJournalEntryLines(entryId);
+
+      res.json({
+        entry,
+        lines,
+        validated: validateDoubleEntry(lines.map(l => ({
+          account_id: l.account_id,
+          entry_type: l.entry_type as 'debit' | 'credit',
+          amount: l.amount
+        })))
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[LEDGER] Entry detail error:', errorMessage);
+      res.status(500).json({ error: 'Failed to fetch entry details' });
+    }
+  });
+
+  // --- Ledger Integrity Check ---
+  app.get("/api/ledger/integrity", authenticate, authorize(['superadmin']), async (req, res) => {
+    try {
+      const integrity = await ledgerService.validateLedgerIntegrity();
+      res.json({
+        valid: integrity.valid,
+        errors: integrity.errors,
+        checkedAt: new Date().toISOString()
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[LEDGER] Integrity check error:', errorMessage);
+      res.status(500).json({ error: 'Failed to check ledger integrity' });
+    }
+  });
+
   // --- Course Offerings CRUD ---
   app.get("/api/course-offerings", authenticate, (req, res) => {
     const offerings = db.prepare(`
@@ -2269,6 +3522,165 @@ async function startServer() {
     const result = db.prepare("INSERT INTO course_offerings (course_id, semester_id, capacity) VALUES (?, ?, ?)").run(course_id, semester_id, capacity || 30);
     logAction((req as any).user.id, "COURSE_OFFERING_CREATE", { course_id, semester_id });
     res.json({ id: result.lastInsertRowid, message: "Course offering created" });
+  });
+
+  // ==========================================
+  // SCHEDULE MANAGEMENT
+  // ==========================================
+
+  // Get all schedules (admin) or faculty/student specific
+  app.get("/api/schedule", authenticate, (req, res) => {
+    const { role } = (req as any).user;
+    
+    if (role === 'superadmin' || role === 'branch_admin') {
+      const schedules = db.prepare(`
+        SELECT cs.*, c.title as course_name, p.name as program_name, 
+               u.full_name as faculty_name, r.name as room_name, b.name as branch_name
+        FROM class_schedule cs
+        JOIN course_offerings co ON cs.course_offering_id = co.id
+        JOIN courses c ON co.course_id = c.id
+        JOIN programs p ON co.program_id = p.id
+        LEFT JOIN users u ON cs.faculty_id = u.id
+        JOIN rooms r ON cs.room_id = r.id
+        JOIN branches b ON r.branch_id = b.id
+        ORDER BY cs.day_of_week, cs.start_time
+      `).all();
+      return res.json(schedules);
+    } else if (role === 'faculty') {
+      const schedules = db.prepare(`
+        SELECT cs.*, c.title as course_name, p.name as program_name, 
+               u.full_name as faculty_name, r.name as room_name, b.name as branch_name
+        FROM class_schedule cs
+        JOIN course_offerings co ON cs.course_offering_id = co.id
+        JOIN courses c ON co.course_id = c.id
+        JOIN programs p ON co.program_id = p.id
+        LEFT JOIN users u ON cs.faculty_id = u.id
+        JOIN rooms r ON cs.room_id = r.id
+        JOIN branches b ON r.branch_id = b.id
+        WHERE cs.faculty_id = ?
+        ORDER BY cs.day_of_week, cs.start_time
+      `).all((req as any).user.id);
+      return res.json(schedules);
+    } else {
+      // Student - get schedule based on enrollments
+      const student = db.prepare("SELECT id FROM students WHERE user_id = ?").get((req as any).user.id) as any;
+      if (!student) return res.json([]);
+      
+      const schedules = db.prepare(`
+        SELECT cs.*, c.title as course_name, p.name as program_name, 
+               u.full_name as faculty_name, r.name as room_name
+        FROM class_schedule cs
+        JOIN course_offerings co ON cs.course_offering_id = co.id
+        JOIN courses c ON co.course_id = c.id
+        JOIN programs p ON co.program_id = p.id
+        LEFT JOIN users u ON cs.faculty_id = u.id
+        JOIN rooms r ON cs.room_id = r.id
+        WHERE co.id IN (SELECT course_offering_id FROM enrollments WHERE student_id = ?)
+        ORDER BY cs.day_of_week, cs.start_time
+      `).all(student.id);
+      return res.json(schedules);
+    }
+  });
+
+  // Get faculty schedule
+  app.get("/api/faculty/schedule", authenticate, authorize(['faculty']), (req, res) => {
+    const schedules = db.prepare(`
+      SELECT cs.*, c.title as course_name, p.name as program_name, 
+             u.full_name as faculty_name, r.name as room_name, b.name as branch_name
+      FROM class_schedule cs
+      JOIN course_offerings co ON cs.course_offering_id = co.id
+      JOIN courses c ON co.course_id = c.id
+      JOIN programs p ON co.program_id = p.id
+      LEFT JOIN users u ON cs.faculty_id = u.id
+      JOIN rooms r ON cs.room_id = r.id
+      JOIN branches b ON r.branch_id = b.id
+      WHERE cs.faculty_id = ?
+      ORDER BY cs.day_of_week, cs.start_time
+    `).all((req as any).user.id);
+    res.json(schedules);
+  });
+
+  // Create schedule entry
+  app.post("/api/schedule", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
+    const { course_offering_id, room_id, day_of_week, start_time, end_time, faculty_id } = req.body;
+    
+    if (!course_offering_id || !room_id || !day_of_week || !start_time || !end_time) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const result = db.prepare(`
+      INSERT INTO class_schedule (course_offering_id, room_id, day_of_week, start_time, end_time, faculty_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(course_offering_id, room_id, day_of_week, start_time, end_time, faculty_id || null);
+    
+    logAction((req as any).user.id, "SCHEDULE_CREATE", { course_offering_id, day_of_week });
+    res.json({ id: result.lastInsertRowid, message: "Schedule created" });
+  });
+
+  // Delete schedule entry
+  app.delete("/api/schedule/:id", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
+    db.prepare("DELETE FROM class_schedule WHERE id = ?").run(req.params.id);
+    logAction((req as any).user.id, "SCHEDULE_DELETE", { scheduleId: req.params.id });
+    res.json({ message: "Schedule deleted" });
+  });
+
+  // Get rooms
+  app.get("/api/rooms", authenticate, (req, res) => {
+    const rooms = db.prepare(`
+      SELECT r.*, b.name as branch_name
+      FROM rooms r
+      LEFT JOIN branches b ON r.branch_id = b.id
+      ORDER BY r.name
+    `).all();
+    res.json(rooms);
+  });
+
+  // Create room
+  app.post("/api/rooms", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
+    const { name, capacity, building, branch_id } = req.body;
+    const result = db.prepare("INSERT INTO rooms (name, capacity, building, branch_id) VALUES (?, ?, ?, ?)").run(
+      name, capacity, building, branch_id
+    );
+    logAction((req as any).user.id, "ROOM_CREATE", { name });
+    res.json({ id: result.lastInsertRowid, message: "Room created" });
+  });
+
+  // ==========================================
+  // COURSE RESOURCES MANAGEMENT
+  // ==========================================
+
+  // Get resource by ID
+  app.get("/api/resources/:id", authenticate, (req, res) => {
+    const resource = db.prepare("SELECT * FROM course_materials WHERE id = ?").get(req.params.id);
+    if (!resource) return res.status(404).json({ error: "Resource not found" });
+    res.json(resource);
+  });
+
+  // Download resource
+  app.get("/api/resources/:id/download", authenticate, (req, res) => {
+    const resource = db.prepare("SELECT * FROM course_materials WHERE id = ?").get(req.params.id);
+    if (!resource) return res.status(404).json({ error: "Resource not found" });
+    
+    const filePath = path.join(__dirname, resource.file_url);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
+    
+    res.download(filePath, resource.title);
+  });
+
+  // Delete resource
+  app.delete("/api/resources/:id", authenticate, authorize(['faculty', 'superadmin']), (req, res) => {
+    const resource = db.prepare("SELECT * FROM course_materials WHERE id = ?").get(req.params.id);
+    if (!resource) return res.status(404).json({ error: "Resource not found" });
+    
+    // Delete file from filesystem
+    const filePath = path.join(__dirname, resource.file_url);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    
+    db.prepare("DELETE FROM course_materials WHERE id = ?").run(req.params.id);
+    logAction((req as any).user.id, "RESOURCE_DELETE", { resourceId: req.params.id });
+    res.json({ message: "Resource deleted" });
   });
 
   // ==========================================
@@ -2312,7 +3724,8 @@ async function startServer() {
 
       res.json({ prediction, student: { name: student.full_name, id: student_id } });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER ERROR]", error);
+      res.status(500).json({ error: "An internal server error occurred." });
     }
   });
 
@@ -2344,7 +3757,8 @@ async function startServer() {
       const atRiskStudents = await aiService.identifyAtRiskStudents(students);
       res.json({ atRiskStudents, total: atRiskStudents.length });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER ERROR]", error);
+      res.status(500).json({ error: "An internal server error occurred." });
     }
   });
 
@@ -2365,7 +3779,8 @@ async function startServer() {
 
       res.json({ comment });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER ERROR]", error);
+      res.status(500).json({ error: "An internal server error occurred." });
     }
   });
 
@@ -2382,7 +3797,8 @@ async function startServer() {
 
       res.json({ response });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER ERROR]", error);
+      res.status(500).json({ error: "An internal server error occurred." });
     }
   });
 
@@ -2399,7 +3815,8 @@ async function startServer() {
 
       res.json({ tips });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER ERROR]", error);
+      res.status(500).json({ error: "An internal server error occurred." });
     }
   });
 
@@ -2419,7 +3836,8 @@ async function startServer() {
         res.status(500).json({ error: result.error });
       }
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER ERROR]", error);
+      res.status(500).json({ error: "An internal server error occurred." });
     }
   });
 
@@ -2441,7 +3859,8 @@ async function startServer() {
         res.status(500).json({ error: result.error });
       }
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER ERROR]", error);
+      res.status(500).json({ error: "An internal server error occurred." });
     }
   });
 
@@ -2719,24 +4138,34 @@ async function startServer() {
       logAction((req as any).user.id, "AUTO_ENROLLMENT", { semester_id, branch_id, ...result });
       res.json({ message: "Auto-enrollment completed", ...result });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER ERROR]", error);
+      res.status(500).json({ error: "An internal server error occurred." });
     }
   });
 
   // Digital Transcript with Signature
-  app.get("/api/students/:id/transcript-digital", authenticate, (req, res) => {
+  app.get("/api/students/:id/transcript-digital", authenticate, authorize(['superadmin', 'branch_admin', 'registrar', 'instructor', 'student']), (req, res) => {
     const studentId = req.params.id;
+    const { role, id: userId } = (req as any).user;
+
+    // Ownership check for students
+    if (role === 'student') {
+      const studentRecord = db.prepare("SELECT id FROM students WHERE user_id = ?").get(userId) as any;
+      if (!studentRecord || studentRecord.id !== parseInt(studentId)) {
+        return res.status(403).json({ error: "Forbidden: You can only view your own transcript" });
+      }
+    }
+
     const crypto = require('crypto');
 
     const student = db.prepare(`
-      SELECT s.*, u.full_name, p.name as program_name, b.name as branch_name
-      FROM students s
-      JOIN users u ON s.user_id = u.id
-      JOIN programs p ON s.program_id = p.id
-      JOIN branches b ON s.branch_id = b.id
+      SELECT s.*, u.full_name, p.name as program_name, b.name as branch_name 
+      FROM students s 
+      JOIN users u ON s.user_id = u.id 
+      JOIN programs p ON s.program_id = p.id 
+      JOIN branches b ON s.branch_id = b.id 
       WHERE s.id = ?
     `).get(studentId) as any;
-
     if (!student) return res.status(404).json({ error: "Student not found" });
 
     const grades = db.prepare(`
@@ -2872,7 +4301,8 @@ async function startServer() {
       logAction((req as any).user.id, "PARENT_STUDENT_UNLINK", { parent_user_id, student_id });
       res.json({ message: "Parent unlinked from student" });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER ERROR]", error);
+      res.status(500).json({ error: "An internal server error occurred." });
     }
   });
 
@@ -3173,9 +4603,32 @@ async function startServer() {
   }
 
   // Start server with port conflict handling
-  const server = app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", async () => {
     console.log(`\n✅ Server running on http://localhost:${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/api/health\n`);
+
+    // Initialize ledger accounts
+    try {
+      await ledgerService.initializeAccounts();
+      const integrity = await ledgerService.validateLedgerIntegrity();
+      if (!integrity.valid) {
+        console.warn('[LEDGER] Integrity check warnings:', integrity.errors);
+      }
+    } catch (error) {
+      console.error('[LEDGER] Initialization error:', error);
+    }
+
+    // Cleanup expired idempotency keys periodically (every hour)
+    setInterval(async () => {
+      try {
+        const cleaned = await idempotencyService.cleanup();
+        if (cleaned > 0) {
+          console.log(`[IDEMPOTENCY] Cleaned up ${cleaned} expired keys`);
+        }
+      } catch (error) {
+        console.error('[IDEMPOTENCY] Cleanup error:', error);
+      }
+    }, 60 * 60 * 1000);
   });
 
   // Handle port already in use

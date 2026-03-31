@@ -12,10 +12,44 @@ services:
         generateValue: true
       - key: PORT
         value: 10000
+      - key: APP_URL
+        value: https://new-dreamland.onrender.com
       - key: ALLOWED_ORIGINS
-        value: https://your-app.vercel.app
+        value: https://new-dreamland.onrender.com,exp://localhost:8081
+      # Supabase Configuration - Add your values from Supabase dashboard
+      - key: VITE_SUPABASE_URL
+        value: YOUR_SUPABASE_URL
+      - key: VITE_SUPABASE_ANON_KEY
+        value: YOUR_SUPABASE_ANON_KEY
+      # SMS - AfroMessage (update with your API key)
+      - key: AFROMESSAGE_API_KEY
+        value: YOUR_AFROMESSAGE_API_KEY
+      - key: AFROMESSAGE_SENDER_ID
+        value: Dreamland
       - key: AFROMESSAGE_MOCK_MODE
+        value: "false"
+      # Email - Resend
+      - key: EMAIL_ENABLED
         value: "true"
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: RESEND_API_KEY
+        value: YOUR_RESEND_API_KEY
+      - key: EMAIL_FROM_NAME
+        value: Dreamland College
+      - key: EMAIL_FROM_ADDRESS
+        value: noreply@your-domain.com
+      # Gemini AI
+      - key: GEMINI_API_KEY
+        value: YOUR_GEMINI_API_KEY
+      # Payments - Chapa
+      - key: CHAPA_SECRET_KEY
+        value: YOUR_CHAPA_SECRET_KEY
+      - key: CHAPA_PUBLIC_KEY
+        value: YOUR_CHAPA_PUBLIC_KEY
       - key: CHAPA_MOCK_MODE
+        value: "true"
+      # Backup
+      - key: BACKUP_ENABLED
         value: "true"
     healthCheckPath: /api/health

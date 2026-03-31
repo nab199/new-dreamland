@@ -3,7 +3,7 @@ import axios from 'axios';
 import { motion } from 'framer-motion';
 import { 
   ShieldCheck, AlertTriangle, RefreshCw, Server, 
-  MessageSquare, Mail, CreditCard, Cpu, HardDrive 
+  MessageSquare, Mail, CreditCard, Cpu, HardDrive, Database
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 

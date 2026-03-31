@@ -6,9 +6,11 @@ import {
 } from 'lucide-react';
 import { backupService, studentService } from '../services/apiServices';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 export default function BackupManagement() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(false);
   const [backups, setBackups] = useState<any[]>([]);
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
@@ -45,31 +47,25 @@ export default function BackupManagement() {
   };
 
   const handleRestore = async (filename: string) => {
-    if (!confirm(`Are you sure you want to restore from ${filename}? This will overwrite current data.`)) {
-      return;
-    }
     setLoading(true);
     try {
       await backupService.restoreBackup(filename);
-      showMessage('success', 'Database restored successfully!');
+      showToast('Database restored successfully!', 'success');
       loadBackups();
     } catch (error: any) {
-      showMessage('error', 'Failed to restore backup');
+      showToast('Failed to restore backup', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async (filename: string) => {
-    if (!confirm(`Are you sure you want to delete ${filename}? This cannot be undone.`)) {
-      return;
-    }
     try {
       await backupService.deleteBackup(filename);
-      showMessage('success', 'Backup deleted');
+      showToast('Backup deleted successfully!', 'success');
       loadBackups();
     } catch (error: any) {
-      showMessage('error', 'Failed to delete backup');
+      showToast('Failed to delete backup', 'error');
     }
   };
 
@@ -93,12 +89,11 @@ export default function BackupManagement() {
   };
 
   const handleExportAll = async () => {
-    if (!confirm('Export all database data? This may take a moment.')) return;
     try {
       await backupService.exportAllData();
-      showMessage('success', 'Export started!');
+      showToast('Export completed!', 'success');
     } catch (error: any) {
-      showMessage('error', 'Failed to export data');
+      showToast('Failed to export data', 'error');
     }
   };
 

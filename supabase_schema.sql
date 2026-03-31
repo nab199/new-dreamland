@@ -200,7 +200,9 @@ CREATE TABLE IF NOT EXISTS registration_periods (
     semester_id INTEGER REFERENCES semesters(id),
     start_date DATE,
     end_date DATE,
-    is_open INTEGER DEFAULT 1
+    is_open INTEGER DEFAULT 1,
+    description TEXT,
+    course_ids TEXT
 );
 
 -- Course Offerings
@@ -306,6 +308,27 @@ CREATE TABLE IF NOT EXISTS submissions (
     feedback TEXT
 );
 
+-- System Settings (for storing API keys, integrations, etc.)
+CREATE TABLE IF NOT EXISTS system_settings (
+    id SERIAL PRIMARY KEY,
+    setting_key TEXT UNIQUE NOT NULL,
+    setting_value TEXT,
+    category TEXT,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Semester Registrations (tracks student registration per semester)
+CREATE TABLE IF NOT EXISTS semester_registrations (
+    id SERIAL PRIMARY KEY,
+    student_id INTEGER NOT NULL REFERENCES students(id),
+    semester_id INTEGER NOT NULL REFERENCES semesters(id),
+    registration_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    status TEXT DEFAULT 'registered',
+    approved_by INTEGER REFERENCES users(id),
+    notes TEXT,
+    UNIQUE(student_id, semester_id)
+);
+
 -- ========================================
 -- 3. Initial Seed Data
 -- ========================================
@@ -367,3 +390,14 @@ INSERT INTO class_schedule (course_offering_id, room_id, day_of_week, start_time
 INSERT INTO scholarships (name, type, value) VALUES 
 ('Merit Scholarship', 'Percentage', 50.0),
 ('Financial Aid', 'Fixed', 2000.0);
+
+-- ========================================
+-- 4. Security Indexes
+-- ========================================
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_reset_tokens_token ON password_reset_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_reset_tokens_user_id ON password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_registration_otps_identifier ON registration_otps(identifier);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);

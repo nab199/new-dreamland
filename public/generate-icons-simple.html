@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dreamland College - PWA Icons</title>
+</head>
+<body>
+  <canvas id="canvas" width="512" height="512" style="display:none;"></canvas>
+  <script>
+    // Generate simple placeholder PWA icons programmatically
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
+    
+    sizes.forEach(size => {
+      canvas.width = size;
+      canvas.height = size;
+      
+      // Background gradient
+      const gradient = ctx.createLinearGradient(0, 0, size, size);
+      gradient.addColorStop(0, '#059669');
+      gradient.addColorStop(1, '#10b981');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+      
+      // Draw "D" letter
+      ctx.fillStyle = 'white';
+      ctx.font = `bold ${size * 0.5}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('D', size / 2, size / 2);
+      
+      // Add "C" for College
+      ctx.font = `bold ${size * 0.15}px Arial`;
+      ctx.fillText('C', size / 2 + size * 0.25, size / 2 + size * 0.3);
+      
+      // Download
+      canvas.toBlob(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `icon-${size}x${size}.png`;
+        a.click();
+      });
+    });
+    
+    console.log('✅ Icons generated! Check your downloads folder.');
+  </script>
+</body>
+</html>

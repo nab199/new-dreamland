@@ -35,7 +35,7 @@ export default function LandingPage() {
       y: 0,
       opacity: 1,
       transition: {
-        type: "spring",
+        type: "spring" as const,
         stiffness: 100
       }
     }
@@ -93,7 +93,7 @@ export default function LandingPage() {
                 Apply Now
                 <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
               </Link>
-              <button className="px-10 py-5 bg-white text-stone-900 border-2 border-stone-200 rounded-2xl font-black text-lg hover:border-emerald-600 hover:text-emerald-600 transition-all active:scale-95">
+              <button onClick={() => document.getElementById('programs')?.scrollIntoView({ behavior: 'smooth' })} className="px-10 py-5 bg-white text-stone-900 border-2 border-stone-200 rounded-2xl font-black text-lg hover:border-emerald-600 hover:text-emerald-600 transition-all active:scale-95">
                 Explore Programs
               </button>
             </motion.div>

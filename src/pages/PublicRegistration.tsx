@@ -42,13 +42,13 @@ export default function PublicRegistration() {
   
   // Verification States
   const [isVerifying, setIsVerifying] = useState(false);
-  const [verificationType, setVerificationType] = useState<'phone' | 'email' | null>(null);
+  const [verificationType, setVerificationType] = useState<'sms' | 'email' | null>(null);
   const [otpValue, setOtpValue] = useState('');
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [isEmailVerified, setIsEmailVerified] = useState(false);
 
   const [files, setFiles] = useState<Record<string, File | null>>({ 
-    diploma: null, transcript: null, id_card: null, portrait: null 
+    diploma: null, transcript: null, id_card: null, portrait: null, cbe_receipt: null 
   });
   
   const [formData, setFormData] = useState({
@@ -105,34 +105,44 @@ export default function PublicRegistration() {
       if (!formData.region) newErrors.region = 'Region is required';
       if (!formData.zone) newErrors.zone = 'Zone is required';
     }
+    if (currentStep === 3) {
+      const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+      if (!formData.password) {
+        newErrors.password = 'Password is required';
+      } else if (!passwordRegex.test(formData.password)) {
+        newErrors.password = 'Must be 8+ chars with uppercase, lowercase, number, and special character';
+      }
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSendOTP = async (type: 'phone' | 'email') => {
-    const identifier = type === 'phone' ? formData.phone : formData.email;
+  const handleSendOTP = async (type: 'sms' | 'email') => {
+    const identifier = type === 'sms' ? formData.phone : formData.email;
+    const phone = type === 'sms' ? formData.phone : undefined;
     try {
       await axios.post('/api/public/send-otp', { 
         identifier, 
         type, 
-        full_name: formData.full_name 
+        full_name: formData.full_name,
+        phone
       });
       setVerificationType(type);
       setIsVerifying(true);
       setOtpValue('');
-      showToast(`Verification code sent to your ${type}`, 'info');
+      showToast(`Verification code sent via ${type === 'sms' ? 'SMS' : 'email'}`, 'info');
     } catch (err) {
       showToast('Failed to send verification code.', 'error');
     }
   };
 
   const handleVerifyOTP = async () => {
-    const identifier = verificationType === 'phone' ? formData.phone : formData.email;
+    const identifier = verificationType === 'sms' ? formData.phone : formData.email;
     try {
       await axios.post('/api/public/verify-otp', { identifier, code: otpValue });
-      if (verificationType === 'phone') {
+      if (verificationType === 'sms') {
         setIsPhoneVerified(true);
-        showToast('Phone number verified!');
+        showToast('Phone number verified! You will receive SMS updates.');
       } else {
         setIsEmailVerified(true);
         showToast('Email address verified!');
@@ -147,9 +157,8 @@ export default function PublicRegistration() {
   const nextStep = () => {
     if (!validateStep(step)) return;
     if (step === 1) {
+      if (!isPhoneVerified) { handleSendOTP('sms'); return; }
       if (!isEmailVerified) { handleSendOTP('email'); return; }
-      // Optional: Keep phone verification if desired, but prioritize email
-      // if (!isPhoneVerified) { handleSendOTP('phone'); return; }
     }
     setStep(prev => prev + 1);
   };
@@ -162,19 +171,56 @@ export default function PublicRegistration() {
     if (!validateStep(3)) return;
     setIsSubmitting(true);
     try {
+      let cbeReceiptVerified = false;
+      let cbePaymentAmount = 0;
+      
       if (formData.payment_method === 'cbe_receipt') {
-        await axios.post('/api/payments/verify-cbe', { reference: formData.transaction_ref, last8Digits: formData.last8Digits });
+        if (files.cbe_receipt) {
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve) => {
+            reader.onload = () => resolve((reader.result as string).split(',')[1]);
+            reader.readAsDataURL(files.cbe_receipt!);
+          });
+          
+          const verifyRes = await axios.post('/api/payments/verify-cbe-receipt', { 
+            imageBase64: base64,
+            expectedAmount: 5000
+          }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+          
+          if (verifyRes.data.verified) {
+            cbeReceiptVerified = true;
+            cbePaymentAmount = verifyRes.data.amount;
+            showToast('CBE payment receipt verified!', 'success');
+          } else {
+            showToast('CBE receipt verification failed: ' + (verifyRes.data.error || 'Unknown error'), 'error');
+            setIsSubmitting(false);
+            return;
+          }
+        } else if (formData.transaction_ref && formData.last8Digits) {
+          await axios.post('/api/payments/verify-cbe', { 
+            reference: formData.transaction_ref, 
+            last8Digits: formData.last8Digits 
+          }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+          cbeReceiptVerified = true;
+        }
       }
+      
       const documentUrls: Record<string, string> = {};
       for (const [key, file] of Object.entries(files)) {
-        if (file) {
+        if (file && key !== 'cbe_receipt') {
           const fileData = new FormData();
           fileData.append('file', file);
           const res = await axios.post('/api/public/upload', fileData);
           documentUrls[`${key}_url`] = res.data.url;
         }
       }
-      const res = await axios.post('/api/public/register-student', { ...formData, ...documentUrls, password: formData.password || 'password123' });
+      
+      const res = await axios.post('/api/public/register-student', { 
+        ...formData, 
+        ...documentUrls, 
+        payment_verified: cbeReceiptVerified,
+        payment_amount: cbePaymentAmount
+      });
       
       const selectedProgram = programs.find(p => p.id == formData.program_id);
       const selectedBranch = branches.find(b => b.id == formData.branch_id);
@@ -184,7 +230,7 @@ export default function PublicRegistration() {
         studentId: res.data.student_id_code,
         program: selectedProgram?.name || 'Assigned Program',
         branch: selectedBranch?.name || 'Main Branch',
-        amount: 5000 // Default registration fee
+        amount: cbePaymentAmount || 5000
       });
       
       localStorage.removeItem('dreamland_reg_draft');
@@ -224,7 +270,7 @@ export default function PublicRegistration() {
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white w-full max-w-md p-8 rounded-[32px] shadow-2xl text-center space-y-4">
               <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-3xl flex items-center justify-center mx-auto"><ShieldCheck size={32} /></div>
               <h3 className="text-xl font-black">Verify your {verificationType}</h3>
-              <p className="text-stone-500 text-sm">Code sent to: <span className="font-bold text-stone-900">{verificationType === 'phone' ? formData.phone : formData.email}</span></p>
+              <p className="text-stone-500 text-sm">Code sent to: <span className="font-bold text-stone-900">{verificationType === 'sms' ? formData.phone : formData.email}</span></p>
               <input type="text" maxLength={6} value={otpValue} onChange={(e) => setOtpValue(e.target.value)} placeholder="0 0 0 0 0 0" className="w-full text-center text-3xl font-black tracking-[12px] py-4 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500" />
               <button onClick={handleVerifyOTP} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 shadow-lg">Confirm & Continue</button>
               <button onClick={() => setIsVerifying(false)} className="text-stone-400 text-sm font-bold hover:text-stone-600">Cancel</button>
@@ -272,7 +318,8 @@ export default function PublicRegistration() {
                 <InputField label={t('full_name')} name="full_name" icon={User} placeholder="e.g. Abebe Kebede" formData={formData} setFormData={setFormData} errors={errors} />
                 <InputField label={t('birth_year')} name="birth_year" type="number" placeholder="e.g. 1995" formData={formData} setFormData={setFormData} errors={errors} />
                 <div className="relative"><InputField label={t('phone')} name="phone" icon={Phone} placeholder="09... or +251..." formData={formData} setFormData={setFormData} errors={errors} />{isPhoneVerified && <div className="absolute right-12 top-[44px] text-emerald-500 flex items-center gap-1 font-bold text-[10px] uppercase bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100"><ShieldCheck size={12}/> Verified</div>}</div>
-                <div className="relative"><InputField label={t('email')} name="email" icon={Mail} type="email" placeholder="email@example.com" formData={formData} setFormData={setFormData} errors={errors} />{isEmailVerified && <div className="absolute right-12 top-[44px] text-emerald-500 flex items-center gap-1 font-bold text-[10px] uppercase bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100"><ShieldCheck size={12}/> Verified</div>}</div>
+                <InputField label={t('email')} name="email" icon={Mail} type="email" placeholder="email@example.com" formData={formData} setFormData={setFormData} errors={errors} />
+                <p className="col-span-2 text-xs text-stone-500">You will receive a verification code via SMS to your phone number.</p>
                 <div className="space-y-2"><label className="text-sm font-bold text-stone-700 block">{t('student_type')}</label><select value={formData.student_type} onChange={(e) => setFormData({...formData, student_type: e.target.value})} className="w-full px-4 py-3.5 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500 font-semibold"><option value="">Select Type</option>{['Regular', 'Extension', 'Weekend', 'Distance'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                 <div className="space-y-2"><label className="text-sm font-bold text-stone-700 block">{t('program')}</label><select value={formData.program_id} onChange={(e) => setFormData({...formData, program_id: e.target.value})} className="w-full px-4 py-3.5 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500 font-semibold"><option value="">Select Program</option>{programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
                 <div className="space-y-2"><label className="text-sm font-bold text-stone-700 block">{t('program_degree')}</label><select value={formData.program_degree} onChange={(e) => setFormData({...formData, program_degree: e.target.value})} className="w-full px-4 py-3.5 bg-stone-50 border-2 border-stone-100 rounded-2xl outline-none focus:border-emerald-500 font-semibold"><option value="">Select Level</option>{['Masters', 'Degree', 'Diploma', 'Certificate'].map(d => <option key={d} value={d}>{d}</option>)}</select></div>
@@ -292,8 +339,21 @@ export default function PublicRegistration() {
           {step === 3 && (
             <div className="space-y-8">
               <div className="flex items-center gap-4 border-b border-stone-100 pb-6"><div className="w-12 h-12 bg-stone-100 rounded-2xl flex items-center justify-center text-emerald-600"><CreditCard size={24} /></div><div><h2 className="text-2xl font-black text-stone-900">{t('payment')}</h2><p className="text-stone-500 text-sm font-medium">Verify your registration fee</p></div></div>
-              <div className="space-y-8"><div className="flex gap-4 p-1 bg-stone-100 rounded-2xl">{['cash', 'cbe_receipt'].map((method) => (<button key={method} type="button" onClick={() => setFormData({...formData, payment_method: method})} className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${formData.payment_method === method ? 'bg-white text-emerald-600 shadow-sm' : 'text-stone-500 hover:bg-stone-200'}`}>{method === 'cash' ? 'Pay at Branch' : 'CBE Receipt'}</button>))}</div>
-              {formData.payment_method === 'cbe_receipt' && (<motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid md:grid-cols-2 gap-6 bg-emerald-50 p-8 rounded-3xl border-2 border-emerald-100"><InputField label="CBE Transaction Reference" name="transaction_ref" placeholder="FT..." formData={formData} setFormData={setFormData} errors={errors} /><InputField label="Last 8 Digits" name="last8Digits" placeholder="Verification digits" maxLength={8} formData={formData} setFormData={setFormData} errors={errors} /></motion.div>)}
+              <div className="space-y-8"><div className="flex gap-4 p-1 bg-stone-100 rounded-2xl">{['cash', 'cbe_receipt'].map((method) => (<button key={method} type="button" onClick={() => setFormData({...formData, payment_method: method})} className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${formData.payment_method === method ? 'bg-white text-emerald-600 shadow-sm' : 'text-stone-500 hover:bg-stone-200'}`}>{method === 'cash' ? 'Pay at Branch' : 'CBE Transfer'}</button>))}</div>
+              {formData.payment_method === 'cbe_receipt' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 bg-emerald-50 p-6 rounded-3xl border-2 border-emerald-100">
+                  <div className="flex items-center gap-2 text-emerald-700 mb-2">
+                    <Upload size={20} />
+                    <h3 className="font-bold uppercase tracking-wider text-sm">Upload CBE Transfer Receipt</h3>
+                  </div>
+                  <p className="text-xs text-stone-600">Upload your CBE bank transfer receipt (PDF or image). The system will extract payment details automatically.</p>
+                  <DropzoneField field="cbe_receipt" label="CBE Receipt (PDF/Image)" files={files} onDrop={onDrop} />
+                  <div className="grid md:grid-cols-2 gap-4 pt-2">
+                    <InputField label="Transaction Reference (if known)" name="transaction_ref" placeholder="FT..." formData={formData} setFormData={setFormData} errors={errors} />
+                    <InputField label="Last 8 Digits" name="last8Digits" placeholder="Verification digits" maxLength={8} formData={formData} setFormData={setFormData} errors={errors} />
+                  </div>
+                </motion.div>
+              )}
               <InputField label="Create Account Password" name="password" type="password" icon={Database} placeholder="At least 6 characters" formData={formData} setFormData={setFormData} errors={errors} /></div>
             </div>
           )}

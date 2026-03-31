@@ -24,13 +24,39 @@ export default function LoginPage() {
     setError('');
     try {
       const response = await axios.post('/api/auth/login', { username, password, rememberMe });
+      
+      // Always store token in localStorage for session persistence
+      localStorage.setItem('dreamland_token', response.data.token);
+      localStorage.setItem('dreamland_user', JSON.stringify(response.data.user));
+      const expiryTime = new Date(Date.now() + (8 * 60 * 60 * 1000)).toISOString();
+      localStorage.setItem('dreamland_token_expiry', expiryTime);
+      console.log('Setting expiry:', expiryTime);
+      if (response.data.refreshToken) {
+        localStorage.setItem('dreamland_refresh_token', response.data.refreshToken);
+      }
+      
+      // Set axios header immediately
+      axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
+      
+      // Update auth context
       login(response.data.token, response.data.user, rememberMe);
+      
       showToast(`Welcome back, ${response.data.user.full_name || username}!`);
-      navigate('/dashboard');
+      
+      // Small delay to ensure state propagates
+      setTimeout(() => navigate('/dashboard'), 50);
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'Login failed. Please try again.';
-      setError(errorMsg);
-      showToast(errorMsg, 'error');
+      const errorData = err.response?.data;
+      const errorMsg = errorData?.error || 'Login failed. Please try again.';
+      
+      // Handle blocked students
+      if (errorData?.error === 'BLOCKED') {
+        setError(errorData.message);
+        showToast(errorData.message, 'error');
+      } else {
+        setError(errorMsg);
+        showToast(errorMsg, 'error');
+      }
     } finally {
       setIsLoading(false);
     }

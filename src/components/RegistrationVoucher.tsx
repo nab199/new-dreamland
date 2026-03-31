@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Download, Printer, CheckCircle, MapPin, Phone, Calendar } from 'lucide-react';
+import { Download, Printer, CheckCircle, MapPin, Phone, Calendar, Info } from 'lucide-react';
 
 interface VoucherProps {
   studentName: string;

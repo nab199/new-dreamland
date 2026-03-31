@@ -147,11 +147,17 @@ export class ChapaService {
 
   /**
    * Verify webhook signature for security
+   * SECURITY: Returns false if no secret is configured - webhooks MUST be signed
    */
   verifyWebhookSignature(payload: string, signature: string): boolean {
     if (!this.webhookSecret) {
-      console.warn('⚠️  Webhook secret not configured. Skipping signature verification.');
-      return true; // In production, this should return false and require configuration
+      console.error('❌ CRITICAL: Webhook secret not configured. Rejecting all webhooks.');
+      return false; // SECURITY: Reject all webhooks if secret not configured
+    }
+
+    if (!signature || signature.length === 0) {
+      console.error('❌ Webhook signature is missing');
+      return false;
     }
 
     try {
@@ -162,7 +168,11 @@ export class ChapaService {
         .update(payload)
         .digest('hex');
       
-      return signature === expectedSignature;
+      const isValid = signature === expectedSignature;
+      if (!isValid) {
+        console.warn('⚠️  Webhook signature mismatch');
+      }
+      return isValid;
     } catch (error) {
       console.error('❌ Webhook signature verification failed:', error);
       return false;

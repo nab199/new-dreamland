@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
+    "@react-native-async-storage/async-storage": "^3.0.1",
     "@supabase/supabase-js": "^2.99.1",
     "@tailwindcss/vite": "^4.1.14",
     "@types/cors": "^2.8.19",
@@ -61,5 +62,18 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
-  }
+  },
+  "description": "",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nab199/new-dreamland.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/nab199/new-dreamland/issues"
+  },
+  "homepage": "https://github.com/nab199/new-dreamland#readme"
 }

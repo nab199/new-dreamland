@@ -1,23 +1,67 @@
 import axios from 'axios';
 
-const API_BASE = '/api';
+// Get API base URL from environment variable or default to /api for same-origin
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 // Set base configuration
 const api = axios.create({
-  baseURL: API_BASE,
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+  // Enable credentials for cross-origin requests
+  withCredentials: API_BASE_URL !== '/api',
+  // Timeout for requests
+  timeout: 30000, // 30 seconds
 });
 
-// Add token interceptor
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('dreamland_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+// Add request interceptor for auth token and error handling
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('dreamland_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    
+    // Add cache-busting for GET requests when offline
+    if (config.method === 'get' && !navigator.onLine) {
+      config.params = {
+        ...config.params,
+        _t: Date.now(),
+      };
+    }
+    
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
   }
-  return config;
-});
+);
+
+// Add response interceptor for error handling
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Handle common errors
+    if (error.code === 'ECONNABORTED') {
+      console.error('Request timeout. Please check your connection.');
+    }
+    
+    if (error.code === 'ERR_NETWORK' || !navigator.onLine) {
+      console.error('Network error. You may be offline.');
+      error.isOffline = true;
+    }
+    
+    if (error.response?.status === 401) {
+      // Token expired or invalid
+      localStorage.removeItem('dreamland_token');
+      localStorage.removeItem('dreamland_user');
+      window.location.href = '/login';
+    }
+    
+    return Promise.reject(error);
+  }
+);
 
 export const aiService = {
   /**
@@ -283,7 +327,7 @@ export const notificationService = {
   /**
    * Send notification (admin only)
    */
-  sendNotification: async (data: { user_id: number; title: string; message: string }) => {
+  sendNotification: async (data: { user_id?: number; role?: string; title: string; message: string }) => {
     const response = await api.post('/notifications/send', data);
     return response.data;
   },

@@ -5,6 +5,7 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  
   return {
     plugins: [react(), tailwindcss()],
     define: {
@@ -17,8 +18,35 @@ export default defineConfig(({mode}) => {
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
+      port: parseInt(env.PORT) || 3000,
+      proxy: {
+        '/api': {
+          target: env.VITE_API_BASE_URL || 'http://localhost:3000',
+          changeOrigin: true,
+          secure: false,
+        },
+      },
+    },
+    build: {
+      outDir: 'dist',
+      sourcemap: true,
+      minify: 'esbuild',
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            'vendor-ui': ['framer-motion', 'lucide-react'],
+            'vendor-charts': ['recharts'],
+            'vendor-utils': ['axios', 'i18next', 'react-i18next'],
+            'vendor-supabase': ['@supabase/supabase-js'],
+          },
+        },
+      },
+    },
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'react-router-dom'],
     },
   };
 });

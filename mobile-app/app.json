@@ -1,0 +1,96 @@
+{
+  "expo": {
+    "name": "Dreamland College",
+    "slug": "dreamland-college",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "dreamland",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#059669"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dreamland.college",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app needs camera access to submit assignment photos",
+        "NSPhotoLibraryUsageDescription": "This app needs photo library access to select assignment images",
+        "NSLocationWhenInUseUsageDescription": "This app uses your location for attendance verification"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#059669",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": true,
+      "package": "com.dreamland.college",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "googleServicesFile": "./google-services.json"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#059669",
+          "sounds": [
+            "./assets/notification-sound.wav"
+          ]
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Dreamland College to access your camera for assignment submissions."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Dreamland College to access your photos for assignment submissions."
+        }
+      ]
+    ],
+    "extra": {
+      "apiUrl": "https://your-backend-url.com/api",
+      "router": {},
+      "eas": {
+        "projectId": "b9b439ac-9e3f-43fc-bf83-e29f5b677746"
+      }
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/YOUR_PROJECT_ID"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "androidStatusBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#059669"
+    }
+  }
+}
