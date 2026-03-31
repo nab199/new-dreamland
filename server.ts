@@ -764,7 +764,7 @@ async function startServer() {
 
   app.post("/api/public/register-student", publicRegLimiter, async (req, res) => {
     const { 
-      full_name, birth_year, region, zone, woreda, kebele, 
+      full_name, birth_date, region, zone, woreda, kebele, 
       phone, email, afroMessage_username, emergency_name, emergency_phone,
       program_id, program_degree, student_type, branch_id, 
       diploma_url, transcript_url, id_card_url, portrait_url, password
@@ -793,12 +793,12 @@ async function startServer() {
       const studentResult = db.prepare(`
         INSERT INTO students (
           user_id, student_id_code, branch_id, program_id, program_degree, student_type, 
-          birth_year, birth_place_region, birth_place_zone, birth_place_woreda, birth_place_kebele,
+          birth_date, birth_place_region, birth_place_zone, birth_place_woreda, birth_place_kebele,
           contact_phone, emergency_contact_name, emergency_contact_phone, documents_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         userResult.lastInsertRowid, student_id_code, branch_id, program_id, program_degree, student_type,
-        birth_year, region, zone, woreda, kebele,
+        birth_date, region, zone, woreda, kebele,
         phone, emergency_name, emergency_phone, JSON.stringify({ diploma_url, transcript_url, id_card_url, portrait_url })
       );
 

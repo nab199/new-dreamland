@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   User, MapPin, Phone, Mail, BookOpen, Upload, 
   ChevronLeft, ChevronRight, CheckCircle, AlertCircle, 
-  Globe, LayoutDashboard, Database, CreditCard, ShieldCheck
+  Globe, LayoutDashboard, Database, CreditCard, ShieldCheck, Calendar
 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { useTranslation } from 'react-i18next';
@@ -52,7 +52,7 @@ export default function PublicRegistration() {
   });
   
   const [formData, setFormData] = useState({
-    full_name: '', birth_year: '', region: '', zone: '', woreda: '', kebele: '',
+    full_name: '', birth_date: '', region: '', zone: '', woreda: '', kebele: '',
     phone: '', email: '', emergency_name: '', emergency_phone: '',
     program_id: '', program_degree: '', student_type: '', branch_id: '',
     payment_method: 'cash', transaction_ref: '', last8Digits: '',
@@ -95,6 +95,7 @@ export default function PublicRegistration() {
     const newErrors: Record<string, string> = {};
     if (currentStep === 1) {
       if (!formData.full_name) newErrors.full_name = 'Full name is required';
+      if (!formData.birth_date) newErrors.birth_date = 'Birth date is required';
       const phoneRegex = /^(?:\+251|0)[79]\d{8}$/;
       if (!formData.phone) newErrors.phone = 'Phone number is required';
       else if (!phoneRegex.test(formData.phone)) newErrors.phone = 'Invalid Ethiopian phone format';
@@ -316,7 +317,20 @@ export default function PublicRegistration() {
               </div>
               <div className="grid md:grid-cols-2 gap-8">
                 <InputField label={t('full_name')} name="full_name" icon={User} placeholder="e.g. Abebe Kebede" formData={formData} setFormData={setFormData} errors={errors} />
-                <InputField label={t('birth_year')} name="birth_year" type="number" placeholder="e.g. 1995" formData={formData} setFormData={setFormData} errors={errors} />
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-stone-700 block">{t('birth_date')}</label>
+                  <div className="relative group">
+                    <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400 group-focus-within:text-emerald-500" size={18} />
+                    <input 
+                      type="date"
+                      value={formData.birth_date}
+                      onChange={(e) => setFormData({...formData, birth_date: e.target.value})}
+                      className={`w-full pl-12 pr-4 py-3.5 bg-stone-50 border-2 rounded-2xl outline-none transition-all ${errors.birth_date ? 'border-red-200 focus:border-red-500 bg-red-50' : 'border-stone-100 focus:border-emerald-500 bg-stone-50'}`}
+                    />
+                    {errors.birth_date && <AlertCircle className="absolute right-4 top-1/2 -translate-y-1/2 text-red-500" size={18} />}
+                  </div>
+                  {errors.birth_date && <p className="text-red-500 text-[11px] font-semibold">{errors.birth_date}</p>}
+                </div>
                 <div className="relative"><InputField label={t('phone')} name="phone" icon={Phone} placeholder="09... or +251..." formData={formData} setFormData={setFormData} errors={errors} />{isPhoneVerified && <div className="absolute right-12 top-[44px] text-emerald-500 flex items-center gap-1 font-bold text-[10px] uppercase bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100"><ShieldCheck size={12}/> Verified</div>}</div>
                 <InputField label={t('email')} name="email" icon={Mail} type="email" placeholder="email@example.com" formData={formData} setFormData={setFormData} errors={errors} />
                 <p className="col-span-2 text-xs text-stone-500">You will receive a verification code via SMS to your phone number.</p>

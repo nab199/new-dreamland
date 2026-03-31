@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS students (
     program_id INTEGER REFERENCES programs(id),
     program_degree TEXT, -- Masters, Certificate, Diploma
     student_type TEXT, -- Regular, Extension, Weekend, Distance
-    birth_year INTEGER,
+    birth_date DATE, -- Full birth date (dd/mm/yyyy format stored as DATE)
     birth_place_region TEXT,
     birth_place_zone TEXT,
     birth_place_woreda TEXT,

@@ -108,5 +108,29 @@ COMMIT;
 -- Test password reset (manual test via /forgot-password)
 
 -- ========================================
+-- 8. Birth Date Migration (March 2026)
+-- ========================================
+
+-- Change birth_year (INTEGER) to birth_date (TEXT in SQLite, stored as dd/mm/yyyy)
+-- SQLite doesn't have DATE type, so we use TEXT with ISO format YYYY-MM-DD for compatibility
+
+-- Add new birth_date column
+ALTER TABLE students ADD COLUMN birth_date TEXT;
+
+-- Copy existing birth_year data to birth_date (convert year to first of January)
+-- This preserves the year data: birth_year 1995 -> birth_date 1995-01-01
+UPDATE students 
+SET birth_date = 
+    CASE 
+        WHEN birth_year IS NOT NULL AND birth_year > 1900 AND birth_year < 2100 
+        THEN birth_year || '-01-01' 
+        ELSE NULL 
+    END
+WHERE birth_date IS NULL;
+
+-- Note: The old birth_year column can be dropped after all data is migrated:
+-- ALTER TABLE students DROP COLUMN birth_year;
+
+-- ========================================
 -- END OF MIGRATION
 -- ========================================
