@@ -339,7 +339,7 @@ export default function RegistrationPeriodManager() {
                 </select>
               </div>
               
-              {(user?.role === 'superadmin' || user?.role === 'registrar') && (
+              {(user?.role === 'superadmin') && (
                 <div>
                   <label className="block text-sm font-semibold text-stone-700 mb-2">Branch (Optional)</label>
                   <select

@@ -99,6 +99,7 @@ export interface DatabaseInterface {
     get<T>(...params: unknown[]): Promise<T | undefined>;
     run(...params: unknown[]): Promise<DatabaseWriteResult>;
   };
+  close(): Promise<void>;
 }
 
 export const db: DatabaseInterface = {
@@ -356,11 +357,28 @@ export const db: DatabaseInterface = {
   },
 
   prepare(sql: string) {
+    if (!usePostgres && sqliteDb) {
+      return sqliteDb.prepare(sql);
+    }
     return {
       all: <T>(...params: unknown[]) => (this as DatabaseInterface).all<T>(sql, params),
       get: <T>(...params: unknown[]) => (this as DatabaseInterface).get<T>(sql, params),
       run: (...params: unknown[]) => (this as DatabaseInterface).run(sql, params)
     };
+  },
+
+  async close(): Promise<void> {
+    if (usePostgres) {
+      if (pool) {
+        await pool.end();
+        pool = null;
+      }
+    } else {
+      if (sqliteDb) {
+        sqliteDb.close();
+        sqliteDb = null;
+      }
+    }
   }
 };
 

@@ -7,10 +7,9 @@ interface VoucherProps {
   studentId: string;
   program: string;
   branch: string;
-  amount: number;
 }
 
-export default function RegistrationVoucher({ studentName, studentId, program, branch, amount }: VoucherProps) {
+export default function RegistrationVoucher({ studentName, studentId, program, branch }: VoucherProps) {
   const handlePrint = () => {
     window.print();
   };
@@ -23,7 +22,7 @@ export default function RegistrationVoucher({ studentName, studentId, program, b
     >
       <div className="bg-emerald-600 p-8 text-white flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-black tracking-tight">REGISTRATION VOUCHER</h2>
+          <h2 className="text-2xl font-black tracking-tight">REGISTRATION CONFIRMATION</h2>
           <p className="opacity-80 font-bold uppercase tracking-widest text-[10px] mt-1">Dreamland College Management System</p>
         </div>
         <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
@@ -38,7 +37,7 @@ export default function RegistrationVoucher({ studentName, studentId, program, b
             <h3 className="text-xl font-black text-stone-900">{studentName}</h3>
           </div>
           <div className="text-right">
-            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Temporary ID</p>
+            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Student ID</p>
             <h3 className="text-xl font-black text-emerald-600 font-mono">{studentId}</h3>
           </div>
         </div>
@@ -65,29 +64,22 @@ export default function RegistrationVoucher({ studentName, studentId, program, b
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 bg-stone-100 rounded-lg flex items-center justify-center text-stone-500"><Calendar size={16} /></div>
               <div>
-                <p className="text-[10px] font-bold text-stone-400 uppercase">Date Generated</p>
+                <p className="text-[10px] font-bold text-stone-400 uppercase">Date Registered</p>
                 <p className="text-sm font-bold">{new Date().toLocaleDateString()}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center text-emerald-600"><CreditCard size={16} /></div>
-              <div>
-                <p className="text-[10px] font-bold text-stone-400 uppercase">Amount Due</p>
-                <p className="text-sm font-black text-emerald-700">{amount.toFixed(2)} ETB</p>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="bg-amber-50 border-2 border-amber-100 p-6 rounded-2xl space-y-3">
-          <h4 className="text-amber-900 font-black text-xs uppercase tracking-widest flex items-center gap-2">
-            <Info size={14} /> Instructions for Payment
+        <div className="bg-emerald-50 border-2 border-emerald-100 p-6 rounded-2xl space-y-3">
+          <h4 className="text-emerald-900 font-black text-xs uppercase tracking-widest flex items-center gap-2">
+            <Info size={14} /> Next Steps
           </h4>
-          <ul className="text-amber-800 text-xs font-bold space-y-2 leading-relaxed opacity-80">
-            <li>1. Present this voucher at any Dreamland College branch finance office.</li>
-            <li>2. You can also pay via CBE Mobile Banking using the ID: {studentId}</li>
-            <li>3. Keep the physical receipt issued by the accountant for your records.</li>
-            <li>4. Your registration will be fully activated within 24 hours of payment.</li>
+          <ul className="text-emerald-800 text-xs font-bold space-y-2 leading-relaxed opacity-80">
+            <li>1. Log in to the student portal using your email and chosen password.</li>
+            <li>2. Complete your profile information if any fields are missing.</li>
+            <li>3. Check the academic calendar for upcoming course registrations.</li>
+            <li>4. Visit your assigned branch for physical ID card processing.</li>
           </ul>
         </div>
 
@@ -96,7 +88,7 @@ export default function RegistrationVoucher({ studentName, studentId, program, b
             onClick={handlePrint}
             className="flex-1 py-4 bg-stone-900 text-white rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-stone-800 transition-all shadow-xl"
           >
-            <Printer size={20} /> Print Voucher
+            <Printer size={20} /> Print Confirmation
           </button>
           <button className="flex-1 py-4 bg-emerald-100 text-emerald-700 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-200 transition-all">
             <Download size={20} /> Save as Image
@@ -113,4 +105,4 @@ export default function RegistrationVoucher({ studentName, studentId, program, b
 
 // Minimal icons for internal use
 const BookOpen = ({ size }: { size: number }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>;
-const CreditCard = ({ size }: { size: number }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>;
+

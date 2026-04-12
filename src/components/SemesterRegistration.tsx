@@ -130,7 +130,7 @@ export default function SemesterRegistration({ onRegistered }: SemesterRegistrat
           </div>
           <h2 className="text-2xl font-bold text-red-600 mb-2">Access Restricted</h2>
           <p className="text-stone-600 mb-6">
-            Your access to the system has been restricted. Please visit the <span className="font-bold">Registrar's Office</span> to resolve this issue.
+            Your access to the system has been restricted. Please visit the <span className="font-bold">Main Office</span> to resolve this issue.
           </p>
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-left">
             <div className="flex items-center gap-2 text-red-800 font-semibold mb-2">
@@ -272,4 +272,6 @@ export default function SemesterRegistration({ onRegistered }: SemesterRegistrat
       </div>
     </div>
   );
+});
+};
 }

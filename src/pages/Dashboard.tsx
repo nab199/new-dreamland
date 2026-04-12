@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useTranslation } from 'react-i18next';
+import ContentAdmin from '../components/ContentAdmin';
 import {
   Users,
   Building2,
@@ -44,12 +45,10 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import EditStudentModal from '../components/EditStudentModal';
 import AIFeatures from '../components/AIFeatures';
-import ParentPortal from '../components/ParentPortal';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
 import BackupManagement from '../components/BackupManagement';
 import AdminStatusDashboard from '../components/AdminStatusDashboard';
 import FloatingAI from '../components/FloatingAI';
-import CBEReceiptUpload from '../components/CBEReceiptUpload';
 import GradeEntry from '../components/GradeEntry';
 import CourseResources from '../components/CourseResources';
 import ScheduleManagement from '../components/ScheduleManagement';
@@ -95,7 +94,7 @@ export default function Dashboard() {
       const headers = { Authorization: `Bearer ${token}` };
 
       // Fetch all data with named promises to avoid index mismatch
-      const studentsRes = ['superadmin', 'branch_admin', 'faculty', 'accountant', 'registrar'].includes(user?.role || '')
+      const studentsRes = ['superadmin', 'branch_admin', 'faculty'].includes(user?.role || '')
         ? axios.get('/api/students', { headers })
         : Promise.resolve({ data: [] });
 
@@ -134,18 +133,18 @@ export default function Dashboard() {
         : Promise.resolve({ data: [] });
 
       const [
-        students,
-        branches,
-        calendars,
-        integrations,
-        enrollments,
-        availableCourses,
-        regStatus,
-        schedule,
-        attendance,
-        invoices,
-        facultyCourses,
-        myCoursesWithInstructors
+        studentsData,
+        branchesData,
+        calendarsData,
+        integrationsData,
+        enrollmentsData,
+        availableCoursesData,
+        regStatusData,
+        scheduleData,
+        attendanceData,
+        invoicesData,
+        facultyCoursesData,
+        myCoursesWithInstructorsData
       ] = await Promise.all([
         studentsRes,
         branchesRes,
@@ -161,18 +160,18 @@ export default function Dashboard() {
         myCoursesRes
       ]);
 
-      setStudents(students.data);
-      setBranches(branches.data);
-      setCalendars(calendars.data);
-      setIntegrations(integrations.data);
-      setEnrollments(enrollments.data);
-      setAvailableCourses(availableCourses.data);
-      setRegStatus(regStatus.data);
-      setSchedule(schedule.data);
-      setAttendance(attendance.data);
-      setInvoices(invoices.data);
-      setFacultyCourses(facultyCourses.data);
-      setMyCoursesWithInstructors(myCoursesWithInstructors.data);
+      setStudents(studentsData.data);
+      setBranches(branchesData.data);
+      setCalendars(calendarsData.data);
+      setIntegrations(integrationsData.data);
+      setEnrollments(enrollmentsData.data);
+      setAvailableCourses(availableCoursesData.data);
+      setRegStatus(regStatusData.data);
+      setSchedule(scheduleData.data);
+      setAttendance(attendanceData.data);
+      setInvoices(invoicesData.data);
+      setFacultyCourses(facultyCoursesData.data);
+      setMyCoursesWithInstructors(myCoursesWithInstructorsData.data);
     } catch (err) {
       console.error('Failed to fetch dashboard data', err);
     } finally {
@@ -185,12 +184,13 @@ export default function Dashboard() {
   }, [token, user?.role]);
 
   const navigation = [
-    { id: 'overview', icon: LayoutDashboard, label: 'Overview', roles: ['superadmin', 'branch_admin', 'faculty', 'accountant', 'student'] },
-    { id: 'students', icon: Users, label: t('students'), roles: ['superadmin', 'branch_admin', 'faculty', 'accountant', 'registrar'] },
+    { id: 'overview', icon: LayoutDashboard, label: 'Overview', roles: ['superadmin', 'branch_admin', 'faculty', 'student'] },
+    { id: 'students', icon: Users, label: t('students'), roles: ['superadmin', 'branch_admin', 'faculty'] },
+    { id: 'content-admin', icon: Users, label: 'Student Management', roles: ['superadmin', 'branch_admin'] },
     { id: 'branches', icon: Building2, label: t('branches'), roles: ['superadmin', 'branch_admin'] },
-    { id: 'academics', icon: BookOpen, label: t('academics'), roles: ['superadmin', 'branch_admin', 'faculty', 'student', 'registrar'] },
-    { id: 'registration-periods', icon: Calendar, label: 'Registration Periods', roles: ['superadmin', 'branch_admin', 'registrar'] },
-    { id: 'credit-hours', icon: CreditCard, label: 'Credit Hours', roles: ['superadmin', 'branch_admin', 'registrar'] },
+    { id: 'academics', icon: BookOpen, label: t('academics'), roles: ['superadmin', 'branch_admin', 'faculty', 'student'] },
+    { id: 'registration-periods', icon: Calendar, label: 'Registration Periods', roles: ['superadmin', 'branch_admin'] },
+    { id: 'credit-hours', icon: CreditCard, label: 'Credit Hours', roles: ['superadmin', 'branch_admin'] },
     { id: 'registration', icon: Plus, label: 'Course Registration', roles: ['student'] },
     { id: 'my-courses', icon: BookOpen, label: 'My Courses & Instructors', roles: ['student'] },
     { id: 'my-classes', icon: Users, label: 'My Classes', roles: ['faculty'] },
@@ -198,16 +198,12 @@ export default function Dashboard() {
     { id: 'resources', icon: BookOpen, label: 'Resources', roles: ['student', 'faculty'] },
     { id: 'schedule', icon: Bell, label: 'Schedule', roles: ['superadmin', 'branch_admin', 'student', 'faculty'] },
     { id: 'attendance', icon: ShieldCheck, label: 'Attendance', roles: ['student', 'faculty'] },
-    { id: 'finance', icon: CreditCard, label: t('finance'), roles: ['superadmin', 'branch_admin', 'accountant', 'student', 'registrar'] },
-    { id: 'payment-verification', icon: FileText, label: 'Verify Payment', roles: ['student'] },
-    { id: 'registrar', icon: User, label: 'Registrar', roles: ['superadmin', 'registrar'] },
-    { id: 'semester-registrations', icon: Calendar, label: 'Semester Regs', roles: ['superadmin', 'branch_admin', 'registrar'] },
+    { id: 'semester-registrations', icon: Calendar, label: 'Semester Regs', roles: ['superadmin', 'branch_admin'] },
     { id: 'user-management', icon: Shield, label: 'User Management', roles: ['superadmin', 'branch_admin'] },
     { id: 'integrations', icon: Settings, label: 'Integrations', roles: ['superadmin'] },
     { id: 'system-status', icon: Activity, label: 'System Health', roles: ['superadmin'] },
     { id: 'ai-features', icon: Brain, label: 'AI Tools', roles: ['superadmin', 'branch_admin', 'faculty'] },
-    { id: 'analytics', icon: BarChart3, label: 'Analytics', roles: ['superadmin', 'branch_admin', 'accountant'] },
-    { id: 'parent-portal', icon: UserCheck, label: 'Parent Portal', roles: ['parent'] },
+    { id: 'analytics', icon: BarChart3, label: 'Analytics', roles: ['superadmin', 'branch_admin'] },
     { id: 'backup', icon: Database, label: 'Backup & GDPR', roles: ['superadmin'] },
   ].filter(item => item.roles.includes(user?.role || ''));
 
@@ -217,7 +213,7 @@ export default function Dashboard() {
   const [materials, setMaterials] = useState<any[]>([]);
   const [studentAssignments, setStudentAssignments] = useState<any[]>([]);
   const [facultyStudents, setFacultyStudents] = useState<any[]>([]);
-  const [financeTab, setFinanceTab] = useState<'verify' | 'fee' | 'invoice'>('verify');
+  const [financeTab, setFinanceTab] = useState<'fee' | 'invoice'>('fee');
   const [integrationTab, setIntegrationTab] = useState<string | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -332,12 +328,6 @@ export default function Dashboard() {
   const handleConfigureIntegration = (integration: string) => {
     setIntegrationTab(integration);
     showToast(`${integration} configuration coming soon`, 'info');
-  };
-
-  const handleRegistrarAction = (action: string) => {
-    if (action === 'schedule') setActiveTab('schedule');
-    else if (action === 'registration') setActiveTab('registration');
-    else setActiveTab('students');
   };
 
   const handleSearch = (query: string) => {
@@ -797,56 +787,10 @@ export default function Dashboard() {
               </>
             )}
 
-            {/* Registrar Overview */}
-            {user?.role === 'registrar' && (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
-                    <div className="w-12 h-12 bg-blue-500 rounded-2xl flex items-center justify-center text-white mb-4">
-                      <Users size={24} />
-                    </div>
-                    <p className="text-sm font-medium text-stone-500">Total Students</p>
-                    <h3 className="text-2xl font-bold text-stone-900 mt-1">{students.length}</h3>
-                  </div>
-                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
-                    <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center text-white mb-4">
-                      <BookOpen size={24} />
-                    </div>
-                    <p className="text-sm font-medium text-stone-500">Active Programs</p>
-                    <h3 className="text-2xl font-bold text-stone-900 mt-1">12</h3>
-                  </div>
-                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
-                    <div className="w-12 h-12 bg-purple-500 rounded-2xl flex items-center justify-center text-white mb-4">
-                      <CreditCard size={24} />
-                    </div>
-                    <p className="text-sm font-medium text-stone-500">Enrollments</p>
-                    <h3 className="text-2xl font-bold text-stone-900 mt-1">{students.filter(s => s.enrollment_status === 'active').length}</h3>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
-                  <h3 className="font-bold text-stone-900 mb-4">Student Records</h3>
-                  <p className="text-stone-500">Use the Students tab to manage student records, registrations, and transcripts.</p>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
         {activeTab === 'system-status' && <AdminStatusDashboard />}
         {activeTab === 'ai-features' && <AIFeatures students={students} />}
         {activeTab === 'analytics' && <AnalyticsDashboard />}
-        {activeTab === 'parent-portal' && <ParentPortal />}
         {activeTab === 'backup' && <BackupManagement />}
-        {activeTab === 'payment-verification' && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold text-stone-900 mb-2">Verify Your Payment</h2>
-              <p className="text-stone-600">Upload your CBE payment receipt to verify your payment</p>
-            </div>
-            <CBEReceiptUpload expectedAmount={invoices.length > 0 ? invoices[0]?.amount : undefined} />
-          </div>
-        )}
 
         {activeTab === 'students' && (
           <div className="space-y-6">
@@ -1154,6 +1098,10 @@ export default function Dashboard() {
           </div>
         )}
 
+        {activeTab === 'content-admin' && (user?.role === 'superadmin' || user?.role === 'branch_admin') && (
+          <ContentAdmin />
+        )}
+
         {activeTab === 'registration' && user?.role === 'student' && (
           <SemesterRegistration onRegistered={() => {
             // After semester registration, show course registration
@@ -1239,112 +1187,17 @@ export default function Dashboard() {
 
         {activeTab === 'finance' && (
           <div className="space-y-6">
-            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
-              <h3 className="text-xl font-bold text-stone-900 mb-6">Finance Management</h3>
-              
-              {user?.role === 'student' && (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div className="bg-blue-50 p-6 rounded-2xl">
-                      <p className="text-sm text-blue-600 font-medium">Total Balance</p>
-                      <p className="text-2xl font-bold text-blue-900 mt-1">{invoices.reduce((sum, i) => sum + (i.amount || 0), 0)} ETB</p>
-                    </div>
-                    <div className="bg-orange-50 p-6 rounded-2xl">
-                      <p className="text-sm text-orange-600 font-medium">Pending</p>
-                      <p className="text-2xl font-bold text-orange-900 mt-1">{invoices.filter(i => i.status === 'pending').length}</p>
-                    </div>
-                    <div className="bg-emerald-50 p-6 rounded-2xl">
-                      <p className="text-sm text-emerald-600 font-medium">Paid</p>
-                      <p className="text-2xl font-bold text-emerald-900 mt-1">{invoices.filter(i => i.status === 'verified').length}</p>
-                    </div>
-                  </div>
-                  
-                  <h4 className="font-bold text-stone-900 mb-4">My Invoices</h4>
-                  {invoices.length > 0 ? (
-                    <div className="space-y-3">
-                      {invoices.map((invoice: any, i: number) => (
-                        <div key={i} className="flex items-center justify-between p-4 bg-stone-50 rounded-2xl">
-                          <div>
-                            <p className="font-bold text-stone-900">{invoice.description || 'Payment'}</p>
-                            <p className="text-sm text-stone-500">{new Date(invoice.created_at).toLocaleDateString()}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-bold text-stone-900">{invoice.amount} ETB</p>
-                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                              invoice.status === 'verified' ? 'bg-emerald-50 text-emerald-600' : 
-                              invoice.status === 'pending' ? 'bg-orange-50 text-orange-600' : 'bg-red-50 text-red-600'
-                            }`}>
-                              {invoice.status}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-stone-500 text-center py-4">No invoices found.</p>
-                  )}
-                </>
-              )}
-
-              {(user?.role === 'superadmin' || user?.role === 'branch_admin' || user?.role === 'accountant') && (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                    <div className="bg-blue-50 p-6 rounded-2xl">
-                      <p className="text-sm text-blue-600 font-medium">Total Revenue</p>
-                      <p className="text-2xl font-bold text-blue-900 mt-1">1,250,000 ETB</p>
-                    </div>
-                    <div className="bg-emerald-50 p-6 rounded-2xl">
-                      <p className="text-sm text-emerald-600 font-medium">Verified</p>
-                      <p className="text-2xl font-bold text-emerald-900 mt-1">45</p>
-                    </div>
-                    <div className="bg-orange-50 p-6 rounded-2xl">
-                      <p className="text-sm text-orange-600 font-medium">Pending</p>
-                      <p className="text-2xl font-bold text-orange-900 mt-1">8</p>
-                    </div>
-                    <div className="bg-purple-50 p-6 rounded-2xl">
-                      <p className="text-sm text-purple-600 font-medium">Fee Structures</p>
-                      <p className="text-2xl font-bold text-purple-900 mt-1">12</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex gap-4 mb-6">
-                    <button onClick={() => setFinanceTab('verify')} className={`px-4 py-2 text-sm font-bold rounded-xl ${financeTab === 'verify' ? 'bg-emerald-600 text-white' : 'bg-stone-100 text-stone-600'} hover:opacity-90`}>Verify Payment</button>
-                    <button onClick={() => { setFinanceTab('fee'); handleManageFeeStructure(); }} className={`px-4 py-2 text-sm font-bold rounded-xl ${financeTab === 'fee' ? 'bg-emerald-600 text-white' : 'bg-stone-100 text-stone-600'} hover:opacity-90`}>Fee Structure</button>
-                    <button onClick={() => handleGenerateInvoice()} className={`px-4 py-2 text-sm font-bold rounded-xl ${financeTab === 'invoice' ? 'bg-emerald-600 text-white' : 'bg-stone-100 text-stone-600'} hover:opacity-90`}>Generate Invoice</button>
-                  </div>
-                  
-                  <h4 className="font-bold text-stone-900 mb-4">Recent Transactions</h4>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="bg-stone-50 text-stone-500 text-xs uppercase">
-                          <th className="px-4 py-3">Student</th>
-                          <th className="px-4 py-3">Amount</th>
-                          <th className="px-4 py-3">Type</th>
-                          <th className="px-4 py-3">Status</th>
-                          <th className="px-4 py-3">Date</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-stone-100">
-                        <tr>
-                          <td className="px-4 py-3">John Doe</td>
-                          <td className="px-4 py-3">5,000 ETB</td>
-                          <td className="px-4 py-3">Tuition</td>
-                          <td className="px-4 py-3"><span className="px-2 py-1 bg-emerald-50 text-emerald-600 text-xs rounded-full">Verified</span></td>
-                          <td className="px-4 py-3">2026-03-20</td>
-                        </tr>
-                        <tr>
-                          <td className="px-4 py-3">Jane Smith</td>
-                          <td className="px-4 py-3">3,500 ETB</td>
-                          <td className="px-4 py-3">Registration</td>
-                          <td className="px-4 py-3"><span className="px-2 py-1 bg-orange-50 text-orange-600 text-xs rounded-full">Pending</span></td>
-                          <td className="px-4 py-3">2026-03-21</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
+            <div className="bg-stone-100 rounded-3xl border border-stone-200 p-6 opacity-70">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-stone-200 rounded-xl flex items-center justify-center text-stone-400">
+                  <CreditCard size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-stone-400">Finance Management</h3>
+                  <p className="text-sm text-stone-500">Payment system is disabled</p>
+                </div>
+              </div>
+              <p className="text-stone-500">The payment system has been disabled. All students are automatically verified for registration without payment.</p>
             </div>
           </div>
         )}
@@ -1357,44 +1210,8 @@ export default function Dashboard() {
           <RegistrationPeriodManager />
         )}
 
-        {activeTab === 'credit-hours' && (user?.role === 'superadmin' || user?.role === 'branch_admin' || user?.role === 'registrar') && (
+        {activeTab === 'credit-hours' && (user?.role === 'superadmin' || user?.role === 'branch_admin') && (
           <CreditHourManager />
-        )}
-
-        {activeTab === 'registrar' && (user?.role === 'superadmin' || user?.role === 'registrar') && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
-              <h3 className="text-xl font-bold text-stone-900 mb-6">Registrar Office</h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div onClick={() => handleRegistrarAction('Student Records')} className="border border-stone-200 rounded-2xl p-6 text-center hover:border-emerald-200 transition-all cursor-pointer">
-                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 mx-auto mb-4">
-                    <Users size={24} />
-                  </div>
-                  <h4 className="font-bold text-stone-900">Student Records</h4>
-                  <p className="text-sm text-stone-500 mt-1">Manage student data</p>
-                </div>
-                <div onClick={() => handleRegistrarAction('Transcripts')} className="border border-stone-200 rounded-2xl p-6 text-center hover:border-emerald-200 transition-all cursor-pointer">
-                  <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 mx-auto mb-4">
-                    <BookOpen size={24} />
-                  </div>
-                  <h4 className="font-bold text-stone-900">Transcripts</h4>
-                  <p className="text-sm text-stone-500 mt-1">Generate transcripts</p>
-                </div>
-                <div onClick={() => handleRegistrarAction('Course Offerings')} className="border border-stone-200 rounded-2xl p-6 text-center hover:border-emerald-200 transition-all cursor-pointer">
-                  <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center text-purple-600 mx-auto mb-4">
-                    <CreditCard size={24} />
-                  </div>
-                  <h4 className="font-bold text-stone-900">Course Offerings</h4>
-                  <p className="text-sm text-stone-500 mt-1">Manage offerings</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'semester-registrations' && (user?.role === 'superadmin' || user?.role === 'branch_admin' || user?.role === 'registrar') && (
-          <RegistrationManagement />
         )}
 
         {activeTab === 'user-management' && (user?.role === 'superadmin' || user?.role === 'branch_admin') && (
@@ -1451,6 +1268,60 @@ export default function Dashboard() {
                       key={notification.id}
                       onClick={() => handleMarkNotificationRead(notification.id)}
                       className={`p-4 rounded-2xl cursor-pointer transition-all border ${
+                        notification.is_read 
+                          ? 'bg-white/50 border-transparent opacity-80' 
+                          : 'bg-white border-emerald-100 shadow-sm'
+                      } hover:bg-stone-50`}
+                    >
+                      <div className="flex gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                          notification.is_read ? 'bg-stone-100 text-stone-400' : 'bg-emerald-50 text-emerald-600'
+                        }`}>
+                          <Bell size={18} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-start mb-1">
+                            <h4 className={`text-sm font-bold truncate ${notification.is_read ? 'text-stone-600' : 'text-stone-900'}`}>
+                              {notification.title}
+                            </h4>
+                            <span className="text-[10px] text-stone-400 whitespace-nowrap">
+                              {new Date(notification.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className={`text-xs leading-relaxed line-clamp-2 ${notification.is_read ? 'text-stone-400' : 'text-stone-500'}`}>
+                            {notification.message}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-12 text-center">
+                    <div className="w-12 h-12 bg-stone-100 rounded-2xl flex items-center justify-center text-stone-300 mx-auto mb-3">
+                      <Bell size={24} />
+                    </div>
+                    <p className="text-sm font-medium text-stone-400">No notifications yet</p>
+                  </div>
+                )}
+              </div>
+              
+              <div className="p-3 border-t border-stone-100 text-center bg-white">
+                <button 
+                  onClick={() => setShowNotifications(false)}
+                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700"
+                >
+                  Close panel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        <FloatingAI />
+      </main>
+    </div>
+  );
+}
+sName={`p-4 rounded-2xl cursor-pointer transition-all border ${
                         notification.is_read 
                           ? 'bg-white/50 border-transparent opacity-80' 
                           : 'bg-white border-emerald-100 shadow-sm'

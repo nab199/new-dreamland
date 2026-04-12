@@ -190,17 +190,6 @@ async function initializeSchema() {
         FOREIGN KEY (program_id) REFERENCES programs(id)
       );
 
-      CREATE TABLE IF NOT EXISTS parent_students (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        parent_user_id INTEGER,
-        student_id INTEGER,
-        relationship TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (parent_user_id) REFERENCES users(id),
-        FOREIGN KEY (student_id) REFERENCES students(id),
-        UNIQUE(parent_user_id, student_id)
-      );
-
       CREATE TABLE IF NOT EXISTS system_settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         setting_key TEXT UNIQUE NOT NULL,
@@ -415,6 +404,9 @@ async function initializeSchema() {
     safeAddColumn('users', 'failed_login_attempts', 'INTEGER DEFAULT 0');
     safeAddColumn('users', 'locked_until', 'TEXT');
     safeAddColumn('course_materials', 'uploaded_by', 'INTEGER');
+    safeAddColumn('students', 'previous_grade', 'TEXT');
+    safeAddColumn('programs', 'degree_level', 'TEXT');
+    safeAddColumn('courses', 'degree_level', 'TEXT');
     
     // Create indexes for better query performance and security
     const indexes = [
@@ -485,12 +477,24 @@ async function initializeSchema() {
 
 // Seed initial data
 async function seedData() {
-  if (usePostgres) return; // Skip seeding for Supabase in this demo (assume pre-seeded)
+  if (usePostgres) {
+    console.log("🐘 Postgres mode active. Skipping local SQLite seeding.");
+    return; 
+  }
   
   const branchCount = await db.get("SELECT COUNT(*) as count FROM branches") as { count: number };
   if (branchCount.count === 0) {
-    await db.run("INSERT INTO branches (name, location, contact) VALUES (?, ?, ?)", ["Main Campus", "Addis Ababa", "+251-911-123456"]);
+    console.log("🌱 Seeding default branches...");
+    await db.run("INSERT INTO branches (name, location, contact) VALUES (?, ?, ?)", ["Addis Ababa Main", "Addis Ababa, 4 Kilo", "+251111223344"]);
+    await db.run("INSERT INTO branches (name, location, contact) VALUES (?, ?, ?)", ["Adama Branch", "Adama, City Center", "+251221112233"]);
     await db.run("INSERT INTO scholarships (name, type, value) VALUES (?, ?, ?)", ["Financial Aid", "Fixed", 2000.0]);
+  }
+
+  const programCount = await db.get("SELECT COUNT(*) as count FROM programs") as { count: number };
+  if (programCount.count === 0) {
+    console.log("🌱 Seeding default programs...");
+    await db.run("INSERT INTO programs (name, code, duration_years, total_credits) VALUES (?, ?, ?, ?)", ["Computer Science", "CS", 4, 147]);
+    await db.run("INSERT INTO programs (name, code, duration_years, total_credits) VALUES (?, ?, ?, ?)", ["Accounting & Finance", "ACC", 3, 110]);
   }
 
   const hashedPassword = await bcrypt.hash("nabiot123", 10);
@@ -498,8 +502,6 @@ async function seedData() {
     { username: "superadmin", role: "superadmin", full_name: "Super Administrator", email: "superadmin@dreamland.edu" },
     { username: "branch_admin", role: "branch_admin", full_name: "Branch Administrator", email: "branch_admin@dreamland.edu", branch_id: 1 },
     { username: "faculty", role: "faculty", full_name: "Faculty Member", email: "faculty@dreamland.edu", branch_id: 1 },
-    { username: "accountant", role: "accountant", full_name: "Accountant", email: "accountant@dreamland.edu", branch_id: 1 },
-    { username: "registrar", role: "registrar", full_name: "Registrar", email: "registrar@dreamland.edu", branch_id: 1 },
     { username: "student", role: "student", full_name: "Student User", email: "student@dreamland.edu", branch_id: 1 },
   ];
 
@@ -694,13 +696,29 @@ async function startServer() {
 
   // Public API Routes
   app.get("/api/public/branches", (req, res) => {
-    const branches = db.prepare("SELECT * FROM branches").all();
-    res.json(branches);
+    try {
+      const branches = db.prepare("SELECT * FROM branches").all();
+      res.json(Array.isArray(branches) ? branches : []);
+    } catch (error) {
+      console.error("[API] Error fetching public branches:", error);
+      res.json([]); // Return empty array to prevent frontend crash
+    }
   });
 
   app.get("/api/public/programs", (req, res) => {
-    const programs = db.prepare("SELECT * FROM programs").all();
-    res.json(programs);
+    try {
+      const { degree_level } = req.query;
+      let programs;
+      if (degree_level) {
+        programs = db.prepare("SELECT * FROM programs WHERE degree_level = ?").all(degree_level);
+      } else {
+        programs = db.prepare("SELECT * FROM programs").all();
+      }
+      res.json(Array.isArray(programs) ? programs : []);
+    } catch (error) {
+      console.error("[API] Error fetching public programs:", error);
+      res.json([]); // Return empty array to prevent frontend programs.map error
+    }
   });
 
   // OTP Verification for Registration
@@ -765,15 +783,15 @@ async function startServer() {
   app.post("/api/public/register-student", publicRegLimiter, async (req, res) => {
     const { 
       full_name, birth_date, region, zone, woreda, kebele, 
-      phone, email, afroMessage_username, emergency_name, emergency_phone,
+      phone, emergency_name, emergency_phone,
       program_id, program_degree, student_type, branch_id, 
-      diploma_url, transcript_url, id_card_url, portrait_url, password
+      previous_grade, password
     } = req.body;
 
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-    if (!password || !passwordRegex.test(password)) {
-      return res.status(400).json({ error: "Password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character." });
+    if (!phone) {
+      return res.status(400).json({ error: 'Phone number is required' });
     }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Generate Student ID: BRANCH-YEAR-SEQUENCE
@@ -784,9 +802,9 @@ async function startServer() {
     const student_id_code = `${branchCode}-${year}-${String(count.count + 1).padStart(4, '0')}`;
 
     try {
-      // Create user first
-      const userResult = db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run(
-        email, hashedPassword, "student", full_name, email
+      // Create user first - use phone as username (email removed)
+      const userResult = db.prepare("INSERT INTO users (username, password, role, full_name) VALUES (?, ?, ?, ?)").run(
+        phone, hashedPassword, "student", full_name
       );
 
       // Create student
@@ -794,19 +812,30 @@ async function startServer() {
         INSERT INTO students (
           user_id, student_id_code, branch_id, program_id, program_degree, student_type, 
           birth_date, birth_place_region, birth_place_zone, birth_place_woreda, birth_place_kebele,
-          contact_phone, emergency_contact_name, emergency_contact_phone, documents_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          contact_phone, emergency_contact_name, emergency_contact_phone, 
+          previous_grade, academic_status, payment_verified, payment_amount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'good_standing', 1, 0)
       `).run(
         userResult.lastInsertRowid, student_id_code, branch_id, program_id, program_degree, student_type,
         birth_date, region, zone, woreda, kebele,
-        phone, emergency_name, emergency_phone, JSON.stringify({ diploma_url, transcript_url, id_card_url, portrait_url })
+        phone, emergency_name, emergency_phone, previous_grade
       );
 
-      logAction(null, "STUDENT_PUBLIC_REG", { email, student_id_code });
+      logAction(null, "STUDENT_PUBLIC_REG", { phone, student_id_code });
       res.json({ id: studentResult.lastInsertRowid, student_id_code });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
+  });
+
+  // Public CBE Receipt Verification (DISABLED - No payment system)
+  app.post("/api/public/verify-cbe-receipt", async (req, res) => {
+    res.status(503).json({ error: 'Payment system is disabled', disabled: true });
+  });
+
+  // Public CBE Reference Verification (DISABLED - No payment system)
+  app.post("/api/public/verify-cbe", async (req, res) => {
+    res.status(503).json({ error: 'Payment system is disabled', disabled: true });
   });
 
   // Academic Status Update Logic
@@ -1164,7 +1193,7 @@ async function startServer() {
   });
 
   // Student Management
-  app.get("/api/students", authenticate, authorize(['superadmin', 'branch_admin', 'faculty', 'accountant', 'registrar']), (req, res) => {
+  app.get("/api/students", authenticate, authorize(['superadmin', 'branch_admin', 'faculty']), (req, res) => {
     const { branch_id, role } = (req as any).user;
     let students;
     if (role === 'superadmin') {
@@ -1188,7 +1217,7 @@ async function startServer() {
     res.json(students);
   });
 
-  app.get("/api/students/:id/transcript", authenticate, authorize(['superadmin', 'branch_admin', 'registrar', 'instructor', 'student']), (req, res) => {
+  app.get("/api/students/:id/transcript", authenticate, authorize(['superadmin', 'branch_admin', 'faculty', 'student']), (req, res) => {
     const studentId = req.params.id;
     const { role, id: userId } = (req as any).user;
 
@@ -1281,17 +1310,18 @@ async function startServer() {
   });
 
   app.post("/api/students", authenticate, authorize(['superadmin', 'branch_admin']), async (req, res) => {
-    const { 
-      full_name, birth_year, region, zone, woreda, kebele, 
-      phone, email, emergency_name, emergency_phone,
-      program_id, program_degree, student_type, branch_id, status, password
+    const {
+      full_name, birth_year, region, zone, woreda, kebele,
+      phone, emergency_name, emergency_phone,
+      program_id, program_degree, student_type, branch_id, status, 
+      previous_grade, password
     } = req.body;
 
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-    if (!password || !passwordRegex.test(password)) {
-      return res.status(400).json({ error: "Password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character." });
+    if (!phone) {
+      return res.status(400).json({ error: 'Phone number is required' });
     }
-    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const hashedPassword = await bcrypt.hash(password || "password123", 10);
 
     // Generate Student ID: BRANCH-YEAR-SEQUENCE
     const branch = db.prepare("SELECT name FROM branches WHERE id = ?").get(branch_id) as any;
@@ -1301,31 +1331,32 @@ async function startServer() {
     const student_id_code = `${branchCode}-${year}-${String(count.count + 1).padStart(4, '0')}`;
 
     try {
-      // Create user first
-      const userResult = db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run(
-        email, hashedPassword, "student", full_name, email
+      // Create user first - use phone as username (email removed)
+      const userResult = db.prepare("INSERT INTO users (username, password, role, full_name) VALUES (?, ?, ?, ?)").run(
+        phone, hashedPassword, "student", full_name
       );
 
       // Create student
       const studentResult = db.prepare(`
         INSERT INTO students (
-          user_id, student_id_code, branch_id, program_id, program_degree, student_type, 
+          user_id, student_id_code, branch_id, program_id, program_degree, student_type,
           birth_year, birth_place_region, birth_place_zone, birth_place_woreda, birth_place_kebele,
-          contact_phone, emergency_contact_name, emergency_contact_phone, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          contact_phone, emergency_contact_name, emergency_contact_phone, status,
+          previous_grade, payment_verified, payment_amount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
       `).run(
         userResult.lastInsertRowid, student_id_code, branch_id, program_id, program_degree, student_type,
         birth_year, region, zone, woreda, kebele,
-        phone, emergency_name, emergency_phone, status
+        phone, emergency_name, emergency_phone, status,
+        previous_grade
       );
 
-      logAction((req as any).user.id, "STUDENT_CREATE", { email, student_id_code });
+      logAction((req as any).user.id, "STUDENT_CREATE", { phone, student_id_code });
       res.json({ id: studentResult.lastInsertRowid, student_id_code });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
-
   app.post("/api/students/bulk-upload", authenticate, authorize(['superadmin', 'branch_admin']), upload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
@@ -1335,11 +1366,16 @@ async function startServer() {
 
       const results = [];
       for (const record of records) {
-        const { full_name, email, phone, branch_id, program_id, program_degree, student_type, password } = record;
+        const { full_name, phone, branch_id, program_id, program_degree, student_type, password } = record;
         
+        if (!phone) {
+          results.push({ phone: phone || 'N/A', status: 'error', error: "Phone number is required" });
+          continue;
+        }
+
         const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
         if (!password || !passwordRegex.test(password)) {
-          results.push({ email, status: 'error', error: "Password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character." });
+          results.push({ phone, status: 'error', error: "Password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character." });
           continue;
         }
 
@@ -1353,8 +1389,9 @@ async function startServer() {
         const student_id_code = `${branchCode}-${year}-${String(count.count + 1).padStart(4, '0')}`;
 
         try {
-          const userResult = db.prepare("INSERT INTO users (username, password, role, full_name, email) VALUES (?, ?, ?, ?, ?)").run(
-            email, hashedPassword, "student", full_name, email
+          // Use phone as username (email removed)
+          const userResult = db.prepare("INSERT INTO users (username, password, role, full_name) VALUES (?, ?, ?, ?)").run(
+            phone, hashedPassword, "student", full_name
           );
 
           db.prepare(`
@@ -1362,9 +1399,9 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?, ?, ?)
           `).run(userResult.lastInsertRowid, student_id_code, branch_id, program_id, program_degree || null, student_type, phone);
 
-          results.push({ email, status: 'success', student_id_code });
+          results.push({ phone, status: 'success', student_id_code });
         } catch (e: any) {
-          results.push({ email, status: 'error', error: e.message });
+          results.push({ phone, status: 'error', error: e.message });
         }
       }
 
@@ -1387,9 +1424,22 @@ async function startServer() {
     const period = db.prepare("SELECT * FROM registration_periods WHERE is_open = 1").get() as any;
     if (!period) return res.status(400).json({ error: "Registration is closed" });
 
+    // Get student's program_degree for validation
+    const student = db.prepare("SELECT program_degree FROM students WHERE user_id = ?").get(student_id) as any;
+    if (!student?.program_degree) {
+      return res.status(400).json({ error: "Student program degree not found" });
+    }
+
     // Check capacity
     const offering = db.prepare("SELECT * FROM course_offerings WHERE id = ?").get(course_offering_id) as any;
     const course = db.prepare("SELECT * FROM courses WHERE id = ?").get(offering.course_id) as any;
+    
+    // STRICT: Verify course degree_level matches student's program_degree
+    if (course.degree_level !== student.program_degree) {
+      return res.status(403).json({ 
+        error: `This course is for ${course.degree_level} students. You are registered as ${student.program_degree}. You cannot enroll in courses outside your program type.`
+      });
+    }
     
     if (is_audit && !course.is_auditable) {
       return res.status(400).json({ error: "Course is not auditable" });
@@ -1561,7 +1611,7 @@ async function startServer() {
     res.json({ isOpen: !!period, period: period || null });
   });
 
-  app.get("/api/registration-periods", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+  app.get("/api/registration-periods", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
     const { branch_id, role } = (req as any).user;
     let periods;
     if (role === 'superadmin') {
@@ -1585,7 +1635,7 @@ async function startServer() {
     res.json(periods);
   });
 
-  app.post("/api/registration-periods", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+  app.post("/api/registration-periods", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
     const { branch_id, semester_id, start_date, end_date, description, course_ids } = req.body;
     const userBranchId = (req as any).user.role === 'branch_admin' ? (req as any).user.branch_id : branch_id;
     const result = db.prepare("INSERT INTO registration_periods (branch_id, semester_id, start_date, end_date, description, course_ids) VALUES (?, ?, ?, ?, ?, ?)").run(
@@ -1595,7 +1645,7 @@ async function startServer() {
     res.json({ id: result.lastInsertRowid, message: "Registration period defined" });
   });
 
-  app.put("/api/registration-periods/:id/toggle", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+  app.put("/api/registration-periods/:id/toggle", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
     const periodId = req.params.id;
     const period = db.prepare("SELECT is_open FROM registration_periods WHERE id = ?").get(periodId) as any;
     
@@ -1610,7 +1660,7 @@ async function startServer() {
     res.json({ message: "Registration period status toggled" });
   });
 
-  app.delete("/api/registration-periods/:id", authenticate, authorize(['superadmin', 'registrar']), (req, res) => {
+  app.delete("/api/registration-periods/:id", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
     db.prepare("DELETE FROM registration_periods WHERE id = ?").run(req.params.id);
     logAction((req as any).user.id, "REG_PERIOD_DELETE", { periodId: req.params.id });
     res.json({ message: "Registration period deleted" });
@@ -1688,7 +1738,7 @@ async function startServer() {
   });
 
   // Get all semester registrations (admin)
-  app.get("/api/semester-registrations", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+  app.get("/api/semester-registrations", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
     const { branch_id, role } = (req as any).user;
     const { semester_id, status } = req.query;
     
@@ -1703,7 +1753,7 @@ async function startServer() {
     `;
     const params: any[] = [];
     
-    if (role === 'branch_admin' || role === 'registrar') {
+    if (role === 'branch_admin') {
       query += " AND s.branch_id = ?";
       params.push(branch_id);
     }
@@ -1725,7 +1775,7 @@ async function startServer() {
   });
 
   // Approve registration (registrar/admin)
-  app.put("/api/semester-registrations/:id/approve", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+  app.put("/api/semester-registrations/:id/approve", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
     const { id } = req.params;
     const userId = (req as any).user.id;
     
@@ -1736,7 +1786,7 @@ async function startServer() {
   });
 
   // Ban student from registration
-  app.put("/api/semester-registrations/:id/ban", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+  app.put("/api/semester-registrations/:id/ban", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
     const userId = (req as any).user.id;
@@ -1748,7 +1798,7 @@ async function startServer() {
   });
 
   // Allow banned student to register (manual override)
-  app.put("/api/semester-registrations/:id/allow", authenticate, authorize(['superadmin', 'branch_admin', 'registrar']), (req, res) => {
+  app.put("/api/semester-registrations/:id/allow", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
     const { id } = req.params;
     const userId = (req as any).user.id;
     
@@ -1799,170 +1849,29 @@ async function startServer() {
 
   // Available Courses
   app.get("/api/courses/available", authenticate, authorize(['student']), (req, res) => {
-    const courses = db.prepare("SELECT co.*, c.title, c.code, c.is_auditable FROM course_offerings co JOIN courses c ON co.course_id = c.id WHERE co.semester_id = (SELECT id FROM semesters WHERE is_active = 1)").all();
+    const { id: userId } = (req as any).user;
+    const student = db.prepare("SELECT program_degree FROM students WHERE user_id = ?").get(userId) as any;
+    
+    // degree_level in courses table matches program_degree in students table (Degree, Diploma, Short Term)
+    // STRICT: Only allow courses that exactly match the student's program_degree
+    if (!student?.program_degree) {
+      return res.status(400).json({ error: 'Student program degree not found' });
+    }
+    
+    const courses = db.prepare(`
+      SELECT co.*, c.title, c.code, c.is_auditable, c.degree_level
+      FROM course_offerings co 
+      JOIN courses c ON co.course_id = c.id 
+      WHERE co.semester_id = (SELECT id FROM semesters WHERE is_active = 1)
+      AND c.degree_level = ?
+    `).all(student.program_degree);
+    
     res.json(courses);
   });
 
-  // Payment Verification
+  // Payment Verification (DISABLED - No payment system)
   app.post("/api/payments/verify", authenticate, authorize(['student']), async (req, res) => {
-    const idempotencyKey = req.headers[IDEMPOTENCY_HEADER.toLowerCase()] as string | undefined;
-
-    // Check idempotency
-    const idempotencyCheck = await idempotencyService.checkAndLock(idempotencyKey, req.body);
-    if (idempotencyCheck.exists && idempotencyCheck.record) {
-      if (idempotencyCheck.processing) {
-        return res.status(409).json({ error: 'Request is already being processed' });
-      }
-      console.log(`[IDEMPOTENCY] Returning cached response for key: ${idempotencyKey}`);
-      return res.status(idempotencyCheck.record.response_status).json(JSON.parse(idempotencyCheck.record.response_body));
-    }
-
-    const { reference, last8Digits, student_id } = req.body;
-
-    // Strict type validation for input
-    if (!reference || typeof reference !== 'string') {
-      return res.status(400).json({ error: 'Reference number is required' });
-    }
-    if (!last8Digits || typeof last8Digits !== 'string' || last8Digits.length !== 8) {
-      return res.status(400).json({ error: 'Last 8 digits of account number are required' });
-    }
-    if (!student_id || typeof student_id !== 'number' || student_id <= 0) {
-      return res.status(400).json({ error: 'Valid student_id is required' });
-    }
-
-    const result = await cbeVerifier.verify(reference, last8Digits);
-
-    // STRICT: Only proceed with DB write if verification explicitly returns success=true
-    if (result.success === true) {
-      // Double-validate the verification signal
-      if (!isStrictVerificationSignal(result)) {
-        console.error('[PAYMENT VERIFY] Invalid verification signal - missing required fields');
-        const response = { error: 'Verification signal invalid' };
-        await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
-        return res.status(500).json(response);
-      }
-
-      // Validate payment insert data strictly
-      const paymentData = {
-        student_id,
-        amount: result.amount,
-        status: 'verified' as const,
-        transaction_ref: reference,
-        payment_method: 'cbe_receipt' as const
-      };
-      const validation = validatePaymentInsert(paymentData);
-      if (!validation.valid) {
-        console.error('[PAYMENT VERIFY] Payment data validation failed:', validation.error);
-        const response = { error: 'Invalid payment data' };
-        await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
-        return res.status(500).json(response);
-      }
-
-      try {
-        // STRICT: Wrap payment + ledger in atomic transaction
-        const userId = (req as any).user?.id || null;
-        const entryNumber = await db.transaction(async (client) => {
-          // Insert payment record
-          const paymentResult = await client.run(
-            "INSERT INTO payments (student_id, amount, status, transaction_ref, payment_method) VALUES (?, ?, 'verified', ?, 'cbe_receipt')",
-            [student_id, result.amount, reference]
-          );
-          const paymentId = Number(paymentResult.lastInsertRowid);
-
-          // Get ledger accounts
-          const bankAccount = await ledgerService.getAccountByCode('1100');
-          const tuitionRevenue = await ledgerService.getAccountByCode('4000');
-
-          if (!bankAccount || !tuitionRevenue) {
-            throw new Error('Required accounts not found. Please initialize ledger accounts.');
-          }
-
-          // Create journal entry
-          const journalResult = await client.run(
-            `INSERT INTO journal_entries (entry_number, date, description, reference_type, reference_id, status, posted_by, posted_at)
-             VALUES (?, datetime('now'), ?, 'payment', ?, 'pending', ?, datetime('now'))`,
-            [`JE-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`, 
-             `Student payment - Student ID: ${student_id}, Amount: ${result.amount} ETB, Method: cbe_receipt`, 
-             paymentId, userId]
-          );
-
-          const journalId = Number(journalResult.lastInsertRowid);
-
-          // Create debit entry (Bank)
-          await client.run(
-            `INSERT INTO journal_entry_lines (journal_entry_id, account_id, entry_type, amount, memo) VALUES (?, ?, ?, ?, ?)`,
-            [journalId, bankAccount.id, 'debit', result.amount, `Payment from student ${student_id}, ref: ${reference}`]
-          );
-
-          // Create credit entry (Tuition Revenue)
-          await client.run(
-            `INSERT INTO journal_entry_lines (journal_entry_id, account_id, entry_type, amount, memo) VALUES (?, ?, ?, ?, ?)`,
-            [journalId, tuitionRevenue.id, 'credit', result.amount, `Tuition payment from student ${student_id}`]
-          );
-
-          // Mark journal entry as posted
-          await client.run(
-            `UPDATE journal_entries SET status = 'posted' WHERE id = ?`,
-            [journalId]
-          );
-
-          return journalId;
-        });
-
-        console.log(`[PAYMENT VERIFY] Atomic transaction completed: Payment + Ledger entry created`);
-
-        logAction((req as any).user.id, "PAYMENT_VERIFY", { reference, amount: result.amount });
-
-        // Get student details
-        const student = db.prepare(`
-          SELECT s.phone, s.full_name, u.email 
-          FROM students s 
-          JOIN users u ON s.user_id = u.id 
-          WHERE s.id = ?
-        `).get(student_id) as any;
-        
-        if (student) {
-          // Send via SMS
-          if (student.contact_phone) {
-            try {
-              await afroMessage.sendSMS(
-                student.contact_phone, 
-                `✅ Payment Confirmed! Dear ${student.full_name}, your payment of ${result.amount} ETB has been verified. Ref: ${reference}. - Dreamland College`
-              );
-              console.log(`✅ Payment notification sent via SMS`);
-            } catch (smsError) {
-              console.error('❌ SMS notification failed:', smsError);
-            }
-          }
-          
-          // Send Email
-          try {
-            await emailService.sendPaymentConfirmation(
-              student.email,
-              student.full_name,
-              result.amount,
-              reference
-            );
-            console.log(`✅ Payment email sent to ${student.email}`);
-          } catch (emailError) {
-            console.error('❌ Payment email failed:', emailError);
-          }
-        }
-
-        const response = { message: "Payment verified successfully", amount: result.amount };
-        await idempotencyService.saveResponse(idempotencyKey || '', 200, response);
-        res.json(response);
-      } catch (dbError: unknown) {
-        console.error('[PAYMENT VERIFY] Database write failed:', dbError);
-        const response = { error: 'Failed to record payment' };
-        await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
-        res.status(500).json(response);
-      }
-    } else {
-      const response = { error: result.error };
-      await idempotencyService.saveResponse(idempotencyKey || '', 400, response);
-      res.status(400).json(response);
-    }
+    res.status(503).json({ error: 'Payment system is disabled', disabled: true });
   });
 
   // Academic Calendars
@@ -1975,25 +1884,16 @@ async function startServer() {
     res.json(calendars);
   });
 
-  // Integration Settings (Superadmin only) - Service Status
+  // Integration Settings (Superadmin only) - Service Status (Payment disabled)
   app.get("/api/settings/integrations", authenticate, authorize(['superadmin']), (req, res) => {
     res.json({
+      payment: {
+        enabled: false,
+        message: 'Payment system is disabled'
+      },
       afroMessage: {
         configured: !!process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'YOUR_TELEGRAM_BOT_TOKEN_HERE',
         mock_mode: process.env.TELEGRAM_MOCK_MODE === 'true'
-      },
-      chapa: {
-        configured: !!process.env.CHAPA_SECRET_KEY && !process.env.CHAPA_SECRET_KEY.includes('REPLACE'),
-        public_key_set: !!process.env.CHAPA_PUBLIC_KEY
-      },
-      cbe_verifier: {
-        configured: !!process.env.CBE_VERIFIER_URL && process.env.CBE_VERIFIER_URL !== 'http://localhost:5001',
-        url: process.env.CBE_VERIFIER_URL || 'Not configured'
-      },
-      email: {
-        enabled: process.env.EMAIL_ENABLED === 'true',
-        provider: process.env.EMAIL_PROVIDER || 'resend',
-        configured: !!process.env.RESEND_API_KEY
       }
     });
   });
@@ -2048,9 +1948,28 @@ async function startServer() {
   });
   app.use("/uploads", express.static(uploadDir));
 
-  app.get("/api/programs", authenticate, authorize(['superadmin', 'branch_admin', 'registrar', 'instructor', 'student', 'parent']), (req, res) => {
-    const programs = db.prepare("SELECT * FROM programs").all();
-    res.json(programs);
+  app.get("/api/programs", authenticate, authorize(['superadmin', 'branch_admin', 'faculty', 'student']), async (req, res) => {
+    try {
+      const { degree_level } = req.query;
+      let programs;
+      if (usePostgres) {
+        let query = (db as any).from('programs').select('*');
+        if (degree_level) query = query.eq('degree_level', degree_level);
+        const { data, error } = await query;
+        if (error) throw error;
+        programs = data;
+      } else {
+        if (degree_level) {
+          programs = db.prepare("SELECT * FROM programs WHERE degree_level = ?").all(degree_level);
+        } else {
+          programs = db.prepare("SELECT * FROM programs").all();
+        }
+      }
+      res.json(Array.isArray(programs) ? programs : []);
+    } catch (error) {
+      console.error("[API] Error fetching programs:", error);
+      res.json([]);
+    }
   });
 
   app.get("/api/announcements", authenticate, (req, res) => {
@@ -2058,22 +1977,13 @@ async function startServer() {
     res.json(announcements);
   });
 
-  // Analytics
+  // Analytics (Payment stats removed - payment system disabled)
   app.get("/api/analytics/dashboard-stats", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
     const enrollmentStats = db.prepare(`
       SELECT b.name as branch, COUNT(s.id) as count 
       FROM branches b 
       LEFT JOIN students s ON b.id = s.branch_id 
       GROUP BY b.id
-    `).all();
-
-    const paymentStats = db.prepare(`
-      SELECT strftime('%Y-%m', created_at) as month, SUM(amount) as total 
-      FROM payments 
-      WHERE status = 'verified' 
-      GROUP BY month 
-      ORDER BY month DESC 
-      LIMIT 6
     `).all();
 
     const programStats = db.prepare(`
@@ -2083,7 +1993,7 @@ async function startServer() {
       GROUP BY p.id
     `).all();
 
-    res.json({ enrollmentStats, paymentStats, programStats });
+    res.json({ enrollmentStats, programStats });
   });
 
   // SMS Message Endpoint
@@ -2118,471 +2028,29 @@ async function startServer() {
     res.json({ success: true, message: `SMS sent: ${result.sent} sent, ${result.failed} failed`, sent: result.sent, failed: result.failed });
   });
 
-  // Chapa Payment Initialization (Real Integration)
+  // Chapa Payment Initialization (DISABLED - No payment system)
   app.post("/api/payments/initialize", authenticate, authorize(['superadmin', 'branch_admin', 'student', 'accountant']), async (req, res) => {
-    const { amount, email, first_name, last_name, phone_number, callback_url, return_url, customization } = req.body;
-    
-    if (!amount || !email || !first_name) {
-      return res.status(400).json({ error: 'Amount, email, and first name are required' });
-    }
-
-    const tx_ref = chapa.generateTxRef('TX');
-    
-    const paymentData = {
-      amount: amount.toString(),
-      currency: 'ETB',
-      email,
-      first_name,
-      last_name: last_name || '',
-      phone_number: phone_number || '',
-      tx_ref,
-      callback_url: callback_url || `${process.env.APP_URL || 'http://localhost:3000'}/api/payments/callback`,
-      return_url: return_url || `${process.env.APP_URL || 'http://localhost:3000'}/payment-success`,
-      customization: customization || {
-        title: 'Dreamland College Payment',
-        description: 'Tuition fee payment'
-      }
-    };
-
-    const result = await chapa.initializePayment(paymentData);
-    
-    if (result.status === 'success' && result.data?.checkout_url) {
-      // Store pending payment in database
-      const student = db.prepare("SELECT id FROM students WHERE user_id = ?").get((req as any).user.id) as any;
-      if (student) {
-        db.prepare(`
-          INSERT INTO payments (student_id, amount, status, transaction_ref, payment_method)
-          VALUES (?, ?, 'pending', ?, 'chapa')
-        `).run(student.id, amount, tx_ref);
-      }
-      
-      logAction((req as any).user.id, "PAYMENT_INITIALIZED", { tx_ref, amount });
-      res.json(result);
-    } else {
-      res.status(500).json({ error: result.message || 'Failed to initialize payment' });
-    }
+    res.status(503).json({ error: 'Payment system is disabled', disabled: true });
   });
 
-  // Chapa Payment Callback
-  // SECURITY: This endpoint verifies callbacks with Chapa API before updating payments
+  // Chapa Payment Callback (DISABLED - No payment system)
   app.get("/api/payments/callback", async (req, res) => {
-    const { tx_ref, status } = req.query;
-    
-    if (!tx_ref) {
-      return res.status(400).json({ error: 'Transaction reference required' });
-    }
-
-    const txRef = Array.isArray(tx_ref) ? tx_ref[0] : tx_ref;
-
-    if (typeof txRef !== 'string' || txRef.length === 0) {
-      return res.status(400).json({ error: 'Invalid transaction reference' });
-    }
-
-    // SECURITY: First verify tx_ref exists in our pending payments
-    const pendingPayment = db.prepare("SELECT * FROM payments WHERE transaction_ref = ? AND status = 'pending'").get(txRef) as any;
-    if (!pendingPayment) {
-      // tx_ref not found or not pending - may already be processed or invalid
-      console.log(`[CALLBACK] No pending payment found for tx_ref: ${txRef}`);
-      return res.redirect(`/payment-success?tx_ref=${txRef}&status=not_found`);
-    }
-
-    // SECURITY: Verify with Chapa API - this is the critical verification step
-    const verification = await chapa.verifyPayment(txRef as string);
-    
-    // STRICT: Only update database when Chapa explicitly confirms success
-    if (verification.status === 'success' && verification.data?.status === 'success') {
-      // Strict validation of verification response
-      if (!verification.data || typeof verification.data.amount !== 'number' || verification.data.amount <= 0) {
-        console.error('[CHAPA CALLBACK] Invalid verification data:', verification.data);
-        return res.redirect(`/payment-success?tx_ref=${txRef}&status=failed`);
-      }
-
-      // Update payment status in database
-      const payment = db.prepare("SELECT * FROM payments WHERE transaction_ref = ?").get(txRef) as any;
-      
-      if (payment) {
-        try {
-          // STRICT: Only write to DB after verified success signal from API
-          await db.strictWrite('UPDATE', 'payments',
-            "UPDATE payments SET status = 'verified' WHERE transaction_ref = ?",
-            [txRef]
-          );
-
-          // Record in accounting ledger (double-entry bookkeeping)
-          const ledgerResult = await ledgerService.recordPayment(
-            payment.student_id,
-            payment.id,
-            verification.data.amount,
-            'chapa',
-            null
-          );
-
-          if (!ledgerResult.success) {
-            console.error('[CHAPA CALLBACK] Ledger entry failed:', ledgerResult.error);
-          }
-          
-          // Get student details for notification
-          const student = db.prepare(`
-            SELECT s.contact_phone, s.full_name, u.email
-            FROM students s
-            JOIN users u ON s.user_id = u.id
-            WHERE s.id = ?
-          `).get(payment.student_id) as any;
-
-          if (student) {
-            // Send SMS notification
-            if (student.contact_phone) {
-              try {
-                await afroMessage.sendSMS(
-                  student.contact_phone,
-                  `✅ Payment Confirmed! Dear ${student.full_name}, your payment of ${verification.data.amount} ETB has been verified. Ref: ${txRef}. - Dreamland College`
-                );
-              } catch (smsError) {
-                console.error('[CHAPA CALLBACK] SMS failed:', smsError);
-              }
-            }
-
-            // Send email notification
-            if (student.email) {
-              try {
-                await emailService.sendPaymentConfirmation(student.email, student.full_name, verification.data.amount, String(txRef));
-              } catch (emailError) {
-                console.error('[CHAPA CALLBACK] Email failed:', emailError);
-              }
-            }
-          }
-
-          logAction(null, "PAYMENT_VERIFIED", { tx_ref: String(txRef), amount: verification.data.amount, ledgerEntry: ledgerResult.entry_number });
-        } catch (dbError: unknown) {
-          console.error('[CHAPA CALLBACK] Database update failed:', dbError);
-        }
-      }
-
-      // Redirect to success page
-      res.redirect(`/payment-success?tx_ref=${txRef}&status=success`);
-    } else {
-      console.warn(`[CHAPA CALLBACK] Payment not verified: ${txRef}, status: ${verification.status}`);
-      res.redirect(`/payment-success?tx_ref=${txRef}&status=failed`);
-    }
+    res.redirect('/payment-success?tx_ref=disabled&status=disabled');
   });
 
-  // Chapa Webhook (for asynchronous payment notifications)
+  // Chapa Webhook (DISABLED - No payment system)
   app.post("/api/payments/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
-    const signature = req.headers['x-chapa-signature'] as string;
-    const payload = req.body.toString();
-    
-    // Verify webhook signature
-    if (!chapa.verifyWebhookSignature(payload, signature)) {
-      console.error('❌ Invalid webhook signature');
-      return res.status(401).json({ error: 'Invalid signature' });
-    }
-
-    let eventData: Record<string, unknown>;
-    try {
-      eventData = JSON.parse(payload);
-    } catch (parseError) {
-      console.error('[WEBHOOK] Failed to parse payload:', parseError);
-      return res.status(400).json({ error: 'Invalid JSON payload' });
-    }
-    
-    // STRICT: Only proceed with verified success signal from webhook
-    if (eventData.status === 'success') {
-      const tx_ref = eventData.tx_ref;
-      
-      // Strict validation of webhook data
-      if (typeof tx_ref !== 'string' || tx_ref.length === 0) {
-        console.error('[WEBHOOK] Missing or invalid tx_ref');
-        return res.json({ received: true });
-      }
-      
-      if (typeof eventData.amount !== 'number' || eventData.amount <= 0) {
-        console.error('[WEBHOOK] Missing or invalid amount');
-        return res.json({ received: true });
-      }
-
-      // Update payment in database
-      const payment = db.prepare("SELECT * FROM payments WHERE transaction_ref = ?").get(tx_ref) as any;
-      
-      if (payment && payment.status !== 'verified') {
-        try {
-          // STRICT: Only write to DB after verified success signal
-          await db.strictWrite('UPDATE', 'payments',
-            "UPDATE payments SET status = 'verified' WHERE transaction_ref = ?",
-            [tx_ref]
-          );
-
-          // Record in accounting ledger (double-entry bookkeeping)
-          const ledgerResult = await ledgerService.recordPayment(
-            payment.student_id,
-            payment.id,
-            eventData.amount as number,
-            'chapa',
-            null
-          );
-
-          if (!ledgerResult.success) {
-            console.error('[WEBHOOK] Ledger entry failed:', ledgerResult.error);
-          }
-          
-          // Get student details for notification
-          const student = db.prepare(`
-            SELECT s.contact_phone, s.full_name, u.email
-            FROM students s
-            JOIN users u ON s.user_id = u.id
-            WHERE s.id = ?
-          `).get(payment.student_id) as any;
-
-          if (student) {
-            if (student.contact_phone) {
-              try {
-                await afroMessage.sendSMS(
-                  student.contact_phone,
-                  `✅ Payment Confirmed! Dear ${student.full_name}, your payment of ${eventData.amount} ETB has been verified. Ref: ${tx_ref}. - Dreamland College`
-                );
-              } catch (smsError) {
-                console.error('[WEBHOOK] SMS failed:', smsError);
-              }
-            }
-            if (student.email) {
-              try {
-                await emailService.sendPaymentConfirmation(student.email, student.full_name, eventData.amount as number, tx_ref as string);
-              } catch (emailError) {
-                console.error('[WEBHOOK] Email failed:', emailError);
-              }
-            }
-          }
-
-          logAction(null, "PAYMENT_WEBHOOK_VERIFIED", { tx_ref, amount: eventData.amount, ledgerEntry: ledgerResult.entry_number });
-        } catch (dbError: unknown) {
-          console.error('[WEBHOOK] Database update failed:', dbError);
-        }
-      }
-    }
-
-    res.json({ received: true });
+    res.json({ received: true, disabled: true });
   });
 
-  // CBE Receipt Verification (Real Integration)
+  // CBE Receipt Verification (DISABLED - No payment system)
   app.post("/api/payments/verify-cbe", authenticate, async (req, res) => {
-    const idempotencyKey = req.headers[IDEMPOTENCY_HEADER.toLowerCase()] as string | undefined;
-
-    // Check idempotency
-    const idempotencyCheck = await idempotencyService.checkAndLock(idempotencyKey, req.body);
-    if (idempotencyCheck.exists && idempotencyCheck.record) {
-      if (idempotencyCheck.processing) {
-        return res.status(409).json({ error: 'Request is already being processed' });
-      }
-      console.log(`[IDEMPOTENCY] Returning cached response for key: ${idempotencyKey}`);
-      return res.status(idempotencyCheck.record.response_status).json(JSON.parse(idempotencyCheck.record.response_body));
-    }
-
-    const { reference, last8Digits } = req.body;
-    
-    if (!reference || !last8Digits) {
-      return res.status(400).json({ error: 'Reference and last 8 digits are required' });
-    }
-
-    const result = await cbeVerifier.verify(reference, last8Digits);
-    
-    // STRICT: Only proceed when verification explicitly returns success=true
-    if (result.success === true) {
-      // Double-validate the verification signal
-      if (!isStrictVerificationSignal(result)) {
-        console.error('[VERIFY-CBE] Invalid verification signal');
-        const response = { error: 'Verification signal invalid' };
-        await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
-        return res.status(500).json(response);
-      }
-
-      const student = db.prepare("SELECT id FROM students WHERE user_id = ?").get((req as any).user.id) as any;
-      
-      if (student) {
-        // Validate payment insert data strictly
-        const paymentData = {
-          student_id: student.id,
-          amount: result.amount,
-          status: 'verified' as const,
-          transaction_ref: reference,
-          payment_method: 'cbe_receipt' as const
-        };
-        const validation = validatePaymentInsert(paymentData);
-        if (!validation.valid) {
-          console.error('[VERIFY-CBE] Payment data validation failed:', validation.error);
-          const response = { error: 'Invalid payment data' };
-          await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
-          return res.status(500).json(response);
-        }
-
-        try {
-          // STRICT: Only write to DB after verified success signal
-          const paymentResult = await db.strictWrite('INSERT', 'payments',
-            "INSERT INTO payments (student_id, amount, status, transaction_ref, payment_method) VALUES (?, ?, 'verified', ?, 'cbe_receipt')",
-            [student.id, result.amount, reference]
-          );
-          const paymentId = Number(paymentResult.lastInsertRowid);
-
-          // Record in accounting ledger (double-entry bookkeeping)
-          const ledgerResult = await ledgerService.recordPayment(
-            student.id,
-            paymentId,
-            result.amount,
-            'cbe_receipt',
-            (req as any).user?.id || null
-          );
-
-          if (!ledgerResult.success) {
-            console.error('[VERIFY-CBE] Ledger entry failed:', ledgerResult.error);
-          }
-
-          // Get student details for notification
-          const studentDetails = db.prepare(`
-            SELECT s.contact_phone, s.full_name, u.email
-            FROM students s
-            JOIN users u ON s.user_id = u.id
-            WHERE s.id = ?
-          `).get(student.id) as any;
-
-          if (studentDetails) {
-            if (studentDetails.contact_phone) {
-              try {
-                await afroMessage.sendSMS(
-                  studentDetails.contact_phone,
-                  `✅ Payment Confirmed! Dear ${studentDetails.full_name}, your payment of ${result.amount} ETB has been verified. Ref: ${reference}. - Dreamland College`
-                );
-              } catch (smsError) {
-                console.error('[VERIFY-CBE] SMS failed:', smsError);
-              }
-            }
-            if (studentDetails.email) {
-              try {
-                await emailService.sendPaymentConfirmation(studentDetails.email, studentDetails.full_name, result.amount, reference);
-              } catch (emailError) {
-                console.error('[VERIFY-CBE] Email failed:', emailError);
-              }
-            }
-          }
-
-          logAction((req as any).user.id, "PAYMENT_CBE_VERIFIED", { reference, amount: result.amount, paymentId, ledgerEntry: ledgerResult.entry_number });
-          const response = { verified: true, amount: result.amount, date: result.date, paymentId, ledgerEntry: ledgerResult.entry_number };
-          await idempotencyService.saveResponse(idempotencyKey || '', 200, response);
-          return res.json(response);
-        } catch (dbError: unknown) {
-          console.error('[VERIFY-CBE] Database write failed:', dbError);
-          const response = { error: 'Failed to record payment' };
-          await idempotencyService.saveResponse(idempotencyKey || '', 500, response);
-          return res.status(500).json(response);
-        }
-      }
-
-      logAction((req as any).user.id, "PAYMENT_CBE_VERIFIED", { reference, amount: result.amount });
-      const response = { verified: true, amount: result.amount, date: result.date };
-      await idempotencyService.saveResponse(idempotencyKey || '', 200, response);
-      res.json(response);
-    } else {
-      const response = { verified: false, error: result.error };
-      await idempotencyService.saveResponse(idempotencyKey || '', 400, response);
-      res.status(400).json(response);
-    }
+    res.status(503).json({ error: 'Payment system is disabled', disabled: true });
   });
 
-  // CBE Receipt Upload Verification (OCR-based)
+  // CBE Receipt Upload Verification (DISABLED - No payment system)
   app.post("/api/payments/verify-cbe-receipt", authenticate, async (req, res) => {
-    const { imageBase64, expectedAmount } = req.body;
-    
-    if (!imageBase64) {
-      return res.status(400).json({ error: 'Receipt image is required' });
-    }
-
-    try {
-      const student = db.prepare("SELECT id, full_name FROM students WHERE user_id = ?").get((req as any).user.id) as any;
-      const user = db.prepare("SELECT full_name FROM users WHERE id = ?").get((req as any).user.id) as any;
-      const studentName = student?.full_name || user?.full_name || '';
-
-      const result = await cbeVerifier.verifyFromReceipt(imageBase64, expectedAmount, studentName);
-      
-      // STRICT: Only proceed with DB write when verification explicitly returns success=true
-      if (result.success === true) {
-        // Validate the verification signal
-        if (!result.reference || typeof result.reference !== 'string' || result.reference.length === 0) {
-          console.error('[VERIFY-CBE-RECEIPT] Invalid verification signal - missing reference');
-          return res.status(500).json({ error: 'Verification signal invalid' });
-        }
-
-        if (typeof result.amount !== 'number' || result.amount <= 0) {
-          console.error('[VERIFY-CBE-RECEIPT] Invalid verification signal - invalid amount');
-          return res.status(500).json({ error: 'Verification signal invalid' });
-        }
-
-        if (student) {
-          // Validate payment insert data strictly
-          const paymentData = {
-            student_id: student.id,
-            amount: result.amount,
-            status: 'verified' as const,
-            transaction_ref: result.reference,
-            payment_method: 'cbe_receipt' as const
-          };
-          const validation = validatePaymentInsert(paymentData);
-          if (!validation.valid) {
-            console.error('[VERIFY-CBE-RECEIPT] Payment data validation failed:', validation.error);
-            return res.status(500).json({ error: 'Invalid payment data' });
-          }
-
-          try {
-            // STRICT: Only write to DB after verified success signal
-            await db.strictWrite('INSERT', 'payments',
-              "INSERT INTO payments (student_id, amount, status, transaction_ref, payment_method) VALUES (?, ?, 'verified', ?, 'cbe_receipt')",
-              [student.id, result.amount, result.reference]
-            );
-
-            const studentDetails = db.prepare(`
-              SELECT s.contact_phone, u.full_name, u.email
-              FROM students s
-              JOIN users u ON s.user_id = u.id
-              WHERE s.id = ?
-            `).get(student.id) as any;
-
-            if (studentDetails) {
-              if (studentDetails.contact_phone) {
-                try {
-                  await afroMessage.sendSMS(
-                    studentDetails.contact_phone,
-                    `✅ Payment Confirmed! Dear ${studentDetails.full_name}, your payment of ${result.amount} ETB has been verified. Ref: ${result.reference}. - Dreamland College`
-                  );
-                } catch (smsError) {
-                  console.error('[VERIFY-CBE-RECEIPT] SMS failed:', smsError);
-                }
-              }
-              if (studentDetails.email) {
-                try {
-                  await emailService.sendPaymentConfirmation(studentDetails.email, studentDetails.full_name, result.amount, result.reference || 'N/A');
-                } catch (emailError) {
-                  console.error('[VERIFY-CBE-RECEIPT] Email failed:', emailError);
-                }
-              }
-            }
-          } catch (dbError: unknown) {
-            console.error('[VERIFY-CBE-RECEIPT] Database write failed:', dbError);
-            return res.status(500).json({ error: 'Failed to record payment' });
-          }
-        }
-
-        logAction((req as any).user.id, "PAYMENT_CBE_RECEIPT_VERIFIED", { reference: result.reference, amount: result.amount });
-        res.json({ 
-          verified: true, 
-          amount: result.amount, 
-          date: result.date,
-          reference: result.reference,
-          payerName: result.payerName
-        });
-      } else {
-        res.status(400).json({ verified: false, error: result.error });
-      }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('❌ Receipt verification error:', errorMessage);
-      res.status(500).json({ error: 'Failed to verify receipt: ' + errorMessage });
-    }
+    res.status(503).json({ error: 'Payment system is disabled', disabled: true });
   });
 
   // ==========================================
@@ -2780,7 +2248,7 @@ async function startServer() {
   });
 
   // --- Paginated Student List ---
-  app.get("/api/students/paginated", authenticate, authorize(['superadmin', 'branch_admin', 'faculty', 'accountant', 'registrar']), (req, res) => {
+  app.get("/api/students/paginated", authenticate, authorize(['superadmin', 'branch_admin', 'faculty']), (req, res) => {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 25;
     const search = req.query.search as string || '';
@@ -3394,16 +2862,9 @@ async function startServer() {
     res.json({ logs, total, page, totalPages: Math.ceil(total / limit) });
   });
 
-  // --- Payment History ---
+  // --- Payment History (DISABLED - No payment system) ---
   app.get("/api/payments", authenticate, authorize(['superadmin', 'branch_admin', 'accountant']), (req, res) => {
-    const payments = db.prepare(`
-      SELECT p.*, u.full_name as student_name, s.student_id_code 
-      FROM payments p 
-      LEFT JOIN students s ON p.student_id = s.id 
-      LEFT JOIN users u ON s.user_id = u.id 
-      ORDER BY p.created_at DESC
-    `).all();
-    res.json(payments);
+    res.status(503).json({ error: 'Payment system is disabled', disabled: true });
   });
 
   // --- Ledger Trial Balance ---
@@ -4306,175 +3767,6 @@ async function startServer() {
     }
   });
 
-  // Get Parent's Children
-  app.get("/api/parent/my-children", authenticate, authorize(['parent']), (req, res) => {
-    const parentUserId = (req as any).user.id;
-
-    const children = db.prepare(`
-      SELECT s.*, u.full_name, u.email, p.name as program_name, b.name as branch_name,
-             ps.relationship
-      FROM parent_students ps
-      JOIN students s ON ps.student_id = s.id
-      JOIN users u ON s.user_id = u.id
-      LEFT JOIN programs p ON s.program_id = p.id
-      LEFT JOIN branches b ON s.branch_id = b.id
-      WHERE ps.parent_user_id = ?
-    `).all(parentUserId) as any[];
-
-    res.json({ children });
-  });
-
-  // Parent View Child's Grades
-  app.get("/api/parent/child/:id/grades", authenticate, authorize(['parent']), (req, res) => {
-    const parentUserId = (req as any).user.id;
-    const childId = parseInt(req.params.id);
-
-    // Verify parent has access to this child
-    const link = db.prepare(`
-      SELECT * FROM parent_students WHERE parent_user_id = ? AND student_id = ?
-    `).get(parentUserId, childId);
-
-    if (!link) {
-      return res.status(403).json({ error: "You don't have access to this student's records" });
-    }
-
-    const grades = db.prepare(`
-      SELECT e.*, c.code, c.title, sem.semester_name
-      FROM enrollments e
-      JOIN courses c ON e.course_id = c.id
-      JOIN semesters sem ON e.semester_id = sem.id
-      WHERE e.student_id = ? AND e.grade IS NOT NULL
-      ORDER BY sem.semester_name DESC
-    `).all(childId) as any[];
-
-    res.json({ grades });
-  });
-
-  // Parent View Child's Attendance
-  app.get("/api/parent/child/:id/attendance", authenticate, authorize(['parent']), (req, res) => {
-    const parentUserId = (req as any).user.id;
-    const childId = parseInt(req.params.id);
-
-    const link = db.prepare(`
-      SELECT * FROM parent_students WHERE parent_user_id = ? AND student_id = ?
-    `).get(parentUserId, childId);
-
-    if (!link) {
-      return res.status(403).json({ error: "You don't have access to this student's records" });
-    }
-
-    const attendance = db.prepare(`
-      SELECT a.*, c.title as course_name, strftime('%Y-%m-%d', a.date) as formatted_date
-      FROM attendance a
-      JOIN enrollments e ON a.enrollment_id = e.id
-      JOIN courses c ON e.course_id = c.id
-      WHERE e.student_id = ?
-      ORDER BY a.date DESC
-      LIMIT 50
-    `).all(childId) as any[];
-
-    // Calculate attendance rate
-    const total = attendance.length;
-    const present = attendance.filter(a => a.status === 'Present').length;
-    const rate = total > 0 ? ((present / total) * 100).toFixed(1) : 0;
-
-    res.json({ attendance, summary: { total, present, absent: total - present, rate } });
-  });
-
-  // Parent View Child's Financial Status
-  app.get("/api/parent/child/:id/finance", authenticate, authorize(['parent']), (req, res) => {
-    const parentUserId = (req as any).user.id;
-    const childId = parseInt(req.params.id);
-
-    const link = db.prepare(`
-      SELECT * FROM parent_students WHERE parent_user_id = ? AND student_id = ?
-    `).get(parentUserId, childId);
-
-    if (!link) {
-      return res.status(403).json({ error: "You don't have access to this student's records" });
-    }
-
-    const invoices = db.prepare(`
-      SELECT i.*, s.name as scholarship_name, sem.semester_name
-      FROM invoices i
-      LEFT JOIN scholarships s ON i.scholarship_id = s.id
-      JOIN semesters sem ON i.semester_id = sem.id
-      WHERE i.student_id = ?
-      ORDER BY i.created_at DESC
-    `).all(childId) as any[];
-
-    const payments = db.prepare(`
-      SELECT * FROM payments
-      WHERE student_id = ?
-      ORDER BY created_at DESC
-    `).all(childId) as any[];
-
-    const totalOwed = invoices.reduce((sum, inv) => sum + inv.balance_due, 0);
-    const totalPaid = payments.reduce((sum, pay) => sum + pay.amount, 0);
-
-    res.json({
-      finance: {
-        invoices,
-        payments,
-        summary: {
-          totalInvoiced: invoices.reduce((sum, inv) => sum + inv.total_amount, 0),
-          totalPaid,
-          balanceDue: totalOwed,
-          financialClearance: (db.prepare("SELECT financial_clearance FROM students WHERE id = ?").get(childId) as any).financial_clearance === 1
-        }
-      }
-    });
-  });
-
-  // Parent View Child's Full Report
-  app.get("/api/parent/child/:id/report", authenticate, authorize(['parent']), (req, res) => {
-    const parentUserId = (req as any).user.id;
-    const childId = parseInt(req.params.id);
-
-    const link = db.prepare(`
-      SELECT * FROM parent_students WHERE parent_user_id = ? AND student_id = ?
-    `).get(parentUserId, childId);
-
-    if (!link) {
-      return res.status(403).json({ error: "You don't have access to this student's records" });
-    }
-
-    const student = db.prepare(`
-      SELECT s.*, u.full_name, u.email, p.name as program_name, b.name as branch_name
-      FROM students s
-      JOIN users u ON s.user_id = u.id
-      LEFT JOIN programs p ON s.program_id = p.id
-      LEFT JOIN branches b ON s.branch_id = b.id
-      WHERE s.id = ?
-    `).get(childId) as any[];
-
-    const grades = db.prepare(`
-      SELECT e.*, c.code, c.title
-      FROM enrollments e
-      JOIN courses c ON e.course_id = c.id
-      WHERE e.student_id = ? AND e.grade IS NOT NULL
-    `).all(childId) as any[];
-
-    const gpa = grades.length > 0 
-      ? (grades.reduce((sum, e) => sum + (e.points || 0), 0) / grades.length).toFixed(2)
-      : 'N/A';
-
-    res.json({
-      student,
-      academicSummary: {
-        gpa,
-        totalCourses: grades.length,
-        grades: {
-          A: grades.filter((g: any) => g.grade === 'A').length,
-          B: grades.filter((g: any) => g.grade === 'B').length,
-          C: grades.filter((g: any) => g.grade === 'C').length,
-          D: grades.filter((g: any) => g.grade === 'D').length,
-          F: grades.filter((g: any) => g.grade === 'F').length
-        }
-      }
-    });
-  });
-
   // ==========================================
   // API DOCUMENTATION
   // ==========================================
@@ -4483,7 +3775,7 @@ async function startServer() {
     const docs = {
       name: "Dreamland College Management System API",
       version: "2.0.0",
-      description: "Enterprise-grade college management API with AI features",
+      description: "Simplified college management API with AI features",
       endpoints: {
         "Authentication": [
           "POST /api/auth/login - User login",
@@ -4501,15 +3793,6 @@ async function startServer() {
           "POST /api/ai/generate-comment - Generate report comments",
           "POST /api/ai/chat - AI chatbot",
           "POST /api/ai/study-tips - Get personalized study tips"
-        ],
-        "Parent Portal": [
-          "POST /api/parent/link-student - Link parent to student",
-          "DELETE /api/parent/unlink-student - Unlink parent from student",
-          "GET /api/parent/my-children - Get parent's children",
-          "GET /api/parent/child/:id/grades - View child's grades",
-          "GET /api/parent/child/:id/attendance - View child's attendance",
-          "GET /api/parent/child/:id/finance - View child's financial status",
-          "GET /api/parent/child/:id/report - View child's full report"
         ],
         "Students": [
           "GET /api/students - List students",
@@ -4540,12 +3823,8 @@ async function startServer() {
         ],
         "Finance": [
           "GET /api/payments - List payments",
-          "POST /api/payments/initialize - Initialize payment",
-          "POST /api/payments/verify - Verify payment",
           "GET /api/finance/scholarships - List scholarships",
-          "POST /api/finance/generate-invoice - Generate invoice",
-          "GET /api/fee-structures - List fee structures",
-          "POST /api/fee-structures - Create fee structure"
+          "GET /api/fee-structures - List fee structures"
         ],
         "Academics": [
           "GET /api/courses - List courses",
@@ -4567,13 +3846,10 @@ async function startServer() {
         "💾 Automated Daily Backups",
         "🔒 GDPR Compliance (Export/Delete)",
         "📱 Mobile App Support (React Native/Expo)",
-        "👨‍👩‍👧 Parent Portal",
-        "📧 SMS Notifications via AfroMessage",
-        "💳 Payment Integration (Chapa, CBE)",
         "🎓 Digital Transcripts with Signatures",
         "⚠️ At-Risk Student Detection",
         "🤖 AI Chatbot Support",
-        "📈 Enrollment & Revenue Trends",
+        "📈 Enrollment Trends",
         "🔍 Course Performance Heatmap",
         "🏫 Multi-Branch Management",
         "📚 LMS Integration (Materials, Assignments, Submissions)"
@@ -4601,6 +3877,14 @@ async function startServer() {
       res.sendFile(path.join(__dirname, "dist", "index.html"));
     });
   }
+
+  // Global Error Handler - Prevents server crashes and provides clean JSON errors
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error(`[SERVER ERROR] ${req.method} ${req.path}:`, err);
+    res.status(err.status || 500).json({
+      error: process.env.NODE_ENV === 'production' ? "Internal server error" : err.message
+    });
+  });
 
   // Start server with port conflict handling
   const server = app.listen(PORT, "0.0.0.0", async () => {
@@ -4649,9 +3933,9 @@ async function startServer() {
   // Graceful shutdown
   process.on('SIGTERM', () => {
     console.log('\n🛑 SIGTERM received. Shutting down gracefully...');
-    server.close(() => {
+    server.close(async () => {
       console.log('💾 Database connection closed');
-      db.close();
+      await db.close();
       console.log('✅ Server closed');
       process.exit(0);
     });
@@ -4659,9 +3943,19 @@ async function startServer() {
 
   process.on('SIGINT', () => {
     console.log('\n🛑 SIGINT received. Shutting down gracefully...');
-    server.close(() => {
+    server.close(async () => {
       console.log('💾 Database connection closed');
-      db.close();
+      await db.close();
+      console.log('✅ Server closed');
+      process.exit(0);
+    });
+  });
+}
+
+startServer();
+.close(async () => {
+      console.log('💾 Database connection closed');
+      await db.close();
       console.log('✅ Server closed');
       process.exit(0);
     });

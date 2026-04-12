@@ -34,21 +34,6 @@ export default function IntegrationSettings({}: IntegrationSettingsProps) {
     fromAddress: ''
   });
 
-  // Payment (Chapa) Settings
-  const [paymentSettings, setPaymentSettings] = useState({
-    enabled: false,
-    secretKey: '',
-    publicKey: '',
-    webhookSecret: '',
-    webhookUrl: ''
-  });
-
-  // CBE Verification Settings
-  const [cbeSettings, setCbeSettings] = useState({
-    enabled: false,
-    verifierUrl: ''
-  });
-
   // AI Settings
   const [aiSettings, setAiSettings] = useState({
     enabled: true,
@@ -58,8 +43,6 @@ export default function IntegrationSettings({}: IntegrationSettingsProps) {
   // Show/hide password fields
   const [showSmsApiKey, setShowSmsApiKey] = useState(false);
   const [showEmailApiKey, setShowEmailApiKey] = useState(false);
-  const [showChapaSecret, setShowChapaSecret] = useState(false);
-  const [showChapaWebhook, setShowChapaWebhook] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -99,19 +82,6 @@ export default function IntegrationSettings({}: IntegrationSettingsProps) {
         }));
       }
 
-      if (systemSettings.payment_config) {
-        setPaymentSettings(systemSettings.payment_config);
-      } else if (integrationsRes.data?.chapa) {
-        setPaymentSettings(prev => ({
-          ...prev,
-          enabled: integrationsRes.data.chapa.configured
-        }));
-      }
-
-      if (systemSettings.cbe_config) {
-        setCbeSettings(systemSettings.cbe_config);
-      }
-
       if (systemSettings.ai_config) {
         setAiSettings(systemSettings.ai_config);
       }
@@ -131,8 +101,6 @@ export default function IntegrationSettings({}: IntegrationSettingsProps) {
       let data: any = {};
       if (category === 'sms') data.sms = smsSettings;
       else if (category === 'email') data.email = emailSettings;
-      else if (category === 'payment') data.payment = paymentSettings;
-      else if (category === 'cbe') data.cbe = cbeSettings;
       else if (category === 'ai') data.ai = aiSettings;
 
       await axios.post('/api/settings/integrations', data, { headers });
@@ -379,174 +347,18 @@ export default function IntegrationSettings({}: IntegrationSettingsProps) {
         </div>
       </div>
 
-      {/* Payment Settings (Chapa) */}
-      <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center text-orange-600">
+      {/* Payment Settings (DISABLED) */}
+      <div className="bg-stone-100 rounded-3xl border border-stone-200 p-6 opacity-60">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 bg-stone-200 rounded-xl flex items-center justify-center text-stone-400">
             <CreditCard size={24} />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-stone-900">Payment Configuration</h3>
-            <p className="text-sm text-stone-500">Configure Chapa payment gateway</p>
+            <h3 className="text-xl font-bold text-stone-400">Payment Configuration</h3>
+            <p className="text-sm text-stone-500">Payment system is disabled</p>
           </div>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={paymentSettings.enabled}
-                onChange={(e) => setPaymentSettings({ ...paymentSettings, enabled: e.target.checked })}
-                className="w-5 h-5 rounded border-stone-300 text-emerald-600 focus:ring-emerald-500"
-              />
-              <span className="text-sm font-semibold text-stone-700">Enable Payment Gateway</span>
-            </label>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-stone-700 mb-2">
-              <Key size={14} className="inline mr-1" />
-              Secret Key
-            </label>
-            <div className="relative">
-              <input
-                type={showChapaSecret ? "text" : "password"}
-                value={paymentSettings.secretKey}
-                onChange={(e) => setPaymentSettings({ ...paymentSettings, secretKey: e.target.value })}
-                placeholder="CHAPUBK-xxxx-xxxx-xxxx-xxxx"
-                className="w-full px-4 py-3 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => setShowChapaSecret(!showChapaSecret)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400"
-              >
-                {showChapaSecret ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-            <p className="text-xs text-stone-500 mt-1">Get from dashboard.chapa.co</p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-stone-700 mb-2">
-              Public Key
-            </label>
-            <input
-              type="text"
-              value={paymentSettings.publicKey}
-              onChange={(e) => setPaymentSettings({ ...paymentSettings, publicKey: e.target.value })}
-              placeholder="CHAPUBK-xxxx-xxxx-xxxx-xxxx"
-              className="w-full px-4 py-3 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-stone-700 mb-2">
-              <Shield size={14} className="inline mr-1" />
-              Webhook Secret
-            </label>
-            <div className="relative">
-              <input
-                type={showChapaWebhook ? "text" : "password"}
-                value={paymentSettings.webhookSecret}
-                onChange={(e) => setPaymentSettings({ ...paymentSettings, webhookSecret: e.target.value })}
-                placeholder="Your webhook secret"
-                className="w-full px-4 py-3 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => setShowChapaWebhook(!showChapaWebhook)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400"
-              >
-                {showChapaWebhook ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold text-stone-700 mb-2">
-              <Globe size={14} className="inline mr-1" />
-              Webhook URL (for Chapa dashboard)
-            </label>
-            <div className="p-4 bg-stone-50 rounded-xl border border-stone-200">
-              <code className="text-sm text-stone-600 font-mono">
-                https://your-domain.com/api/payments/webhook
-              </code>
-            </div>
-            <p className="text-xs text-stone-500 mt-1">Configure this URL in your Chapa dashboard webhook settings</p>
-          </div>
-        </div>
-
-        <div className="flex gap-3 mt-6">
-          <button
-            onClick={() => handleSave('payment')}
-            disabled={isSaving}
-            className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 disabled:opacity-50"
-          >
-            <Save size={18} />
-            {isSaving ? 'Saving...' : 'Save Payment Settings'}
-          </button>
-          <button
-            onClick={() => testConnection('Payment')}
-            disabled={isTesting === 'Payment'}
-            className="flex items-center gap-2 px-6 py-2.5 bg-stone-100 text-stone-600 rounded-xl font-semibold hover:bg-stone-200 disabled:opacity-50"
-          >
-            <RefreshCw size={18} className={isTesting === 'Payment' ? 'animate-spin' : ''} />
-            {isTesting === 'Payment' ? 'Testing...' : 'Test Connection'}
-          </button>
-        </div>
-      </div>
-
-      {/* CBE Verification Settings */}
-      <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center text-green-600">
-            <Shield size={24} />
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-stone-900">CBE Receipt Verification</h3>
-            <p className="text-sm text-stone-500">Configure CBE bank receipt verification</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={cbeSettings.enabled}
-                onChange={(e) => setCbeSettings({ ...cbeSettings, enabled: e.target.checked })}
-                className="w-5 h-5 rounded border-stone-300 text-emerald-600 focus:ring-emerald-500"
-              />
-              <span className="text-sm font-semibold text-stone-700">Enable CBE Verification</span>
-            </label>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-stone-700 mb-2">
-              Verifier Service URL
-            </label>
-            <input
-              type="url"
-              value={cbeSettings.verifierUrl}
-              onChange={(e) => setCbeSettings({ ...cbeSettings, verifierUrl: e.target.value })}
-              placeholder="https://your-cbe-verifier-service.com/verify"
-              className="w-full px-4 py-3 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="flex gap-3 mt-6">
-          <button
-            onClick={() => handleSave('cbe')}
-            disabled={isSaving}
-            className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 disabled:opacity-50"
-          >
-            <Save size={18} />
-            {isSaving ? 'Saving...' : 'Save CBE Settings'}
-          </button>
-        </div>
+        <p className="text-stone-500 text-sm">The payment system has been disabled. No payment configuration is required.</p>
       </div>
 
       {/* AI Settings */}

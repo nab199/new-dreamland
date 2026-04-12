@@ -132,5 +132,26 @@ WHERE birth_date IS NULL;
 -- ALTER TABLE students DROP COLUMN birth_year;
 
 -- ========================================
+-- 9. Course Degree Level Restriction (April 2026)
+-- ========================================
+-- This adds degree_level columns to enforce strict course enrollment restrictions:
+-- - Degree students can ONLY enroll in Degree courses
+-- - Diploma students can ONLY enroll in Diploma courses
+-- - Short Term students can ONLY enroll in Short Term courses
+
+-- Add degree_level to programs table
+ALTER TABLE programs ADD COLUMN degree_level TEXT;
+
+-- Add degree_level to courses table
+ALTER TABLE courses ADD COLUMN degree_level TEXT;
+
+-- Add program_degree to students table (already exists, but ensure it's documented)
+-- program_degree values: Masters, Degree, Diploma, Short Term, Certificate
+
+-- Sample data update (optional - update existing courses to have degree_level)
+-- UPDATE courses SET degree_level = 'Degree' WHERE code LIKE 'CS%' OR code LIKE 'ENG%';
+-- UPDATE courses SET degree_level = 'Diploma' WHERE code LIKE 'DIP%';
+
+-- ========================================
 -- END OF MIGRATION
 -- ========================================

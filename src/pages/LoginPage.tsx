@@ -88,15 +88,15 @@ export default function LoginPage() {
               )}
 
               <div>
-                <label className="block text-sm font-semibold text-stone-700 mb-2">{t('username')}</label>
+                <label className="block text-sm font-semibold text-stone-700 mb-2">Phone Number</label>
                 <div className="relative">
                   <User className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
                   <input
-                    type="text"
+                    type="tel"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     className="w-full pl-12 pr-4 py-3 bg-stone-50 border border-stone-200 rounded-2xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all outline-none"
-                    placeholder="Enter your username"
+                    placeholder="Enter your phone number"
                     required
                   />
                 </div>

@@ -129,7 +129,6 @@ export default function UserManagement() {
     switch (role) {
       case 'superadmin': return <Shield className="text-purple-600" size={18} />;
       case 'branch_admin': return <Building2 className="text-blue-600" size={18} />;
-      case 'accountant': return <Calculator className="text-green-600" size={18} />;
       case 'faculty': return <BookOpen className="text-orange-600" size={18} />;
       default: return <Users className="text-gray-600" size={18} />;
     }
@@ -139,10 +138,8 @@ export default function UserManagement() {
     const colors: Record<string, string> = {
       superadmin: 'bg-purple-100 text-purple-700',
       branch_admin: 'bg-blue-100 text-blue-700',
-      accountant: 'bg-green-100 text-green-700',
       faculty: 'bg-orange-100 text-orange-700',
-      student: 'bg-gray-100 text-gray-700',
-      registrar: 'bg-amber-100 text-amber-700'
+      student: 'bg-gray-100 text-gray-700'
     };
     return colors[role] || 'bg-gray-100 text-gray-700';
   };
@@ -375,9 +372,7 @@ export default function UserManagement() {
                   className="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 >
                   <option value="branch_admin">Branch Admin</option>
-                  <option value="accountant">Accountant</option>
                   <option value="faculty">Faculty</option>
-                  <option value="registrar">Registrar</option>
                 </select>
               </div>
               {promoteData.role === 'branch_admin' && (
@@ -404,6 +399,11 @@ export default function UserManagement() {
               </button>
             </form>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}>
         </div>
       )}
     </div>

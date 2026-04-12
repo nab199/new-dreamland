@@ -258,7 +258,7 @@ export default function GradeEntry({ facultyCourses }: GradeEntryProps) {
         });
         
         await notificationService.sendNotification({
-          role: 'registrar',
+          role: 'branch_admin',
           title: 'Marklist Submitted',
           message: `Professor submitted the final marklist for ${selectedCourse.course_name || selectedCourse.title}.`
         });

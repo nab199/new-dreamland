@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS programs (
     name TEXT NOT NULL,
     code TEXT UNIQUE,
     duration_years INTEGER,
-    total_credits INTEGER
+    total_credits INTEGER,
+    degree_level TEXT -- Masters, Degree, Diploma, Short Term, Certificate
 );
 
 -- Students
@@ -47,7 +48,7 @@ CREATE TABLE IF NOT EXISTS students (
     student_id_code TEXT UNIQUE,
     branch_id INTEGER REFERENCES branches(id),
     program_id INTEGER REFERENCES programs(id),
-    program_degree TEXT, -- Masters, Certificate, Diploma
+    program_degree TEXT, -- Masters, Degree, Diploma, Short Term, Certificate - restricts which courses students can enroll in
     student_type TEXT, -- Regular, Extension, Weekend, Distance
     birth_date DATE, -- Full birth date (dd/mm/yyyy format stored as DATE)
     birth_place_region TEXT,
@@ -61,7 +62,8 @@ CREATE TABLE IF NOT EXISTS students (
     academic_status TEXT DEFAULT 'good_standing',
     current_semester_id INTEGER,
     documents_json JSONB, -- Postgres uses JSONB for better performance
-    financial_clearance INTEGER DEFAULT 0
+    financial_clearance INTEGER DEFAULT 0,
+    previous_grade TEXT -- Entrance exam or previous CGPA score
 );
 
 -- Parents
@@ -81,7 +83,8 @@ CREATE TABLE IF NOT EXISTS courses (
     title TEXT NOT NULL,
     credits INTEGER NOT NULL,
     prerequisites TEXT,
-    is_auditable INTEGER DEFAULT 0
+    is_auditable INTEGER DEFAULT 0,
+    degree_level TEXT -- Masters, Degree, Diploma, Short Term, Certificate - restricts which students can enroll
 );
 
 -- Semesters
