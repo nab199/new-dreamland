@@ -26,6 +26,14 @@ import { ledgerService } from './src/services/ledgerService';
 dotenv.config();
 dotenv.config({ path: '.env.local' });
 
+// SECURITY: Enforce secure JWT_SECRET in production
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'fallback-secret-change-me')) {
+  console.error("FATAL ERROR: JWT_SECRET is not set or is insecure in production environment.");
+  process.exit(1);
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret-change-me";
+
 const cbeVerifier = new CBEVerificationService();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -33,6 +41,14 @@ const __dirname = path.dirname(__filename);
 
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+// Sanitize AfroMessage initialization log
+const afroKey = process.env.AFROMESSAGE_API_KEY;
+if (afroKey) {
+  console.log(`ðŸ“± AfroMessage SMS service initialized (Key: ${afroKey.substring(0, 4)}***)`);
+} else {
+  console.warn("âš ï¸  AfroMessage API Key not configured. SMS features will fail.");
+}
 
 // SECURITY: Multer configuration with file type validation
 const ALLOWED_MIME_TYPES = [
@@ -133,6 +149,12 @@ const smsLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5, // Reduced from 10 to 5
   message: { error: "Too many SMS requests, please slow down." }
+});
+
+const publicUploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5, // Max 5 uploads per hour for public access
+  message: { error: "Upload limit exceeded. Please try again later." }
 });
 
 async function initializeSchema() {
@@ -390,6 +412,15 @@ async function initializeSchema() {
     
     // Safe migrations for SQLite - check if columns exist before adding
     function safeAddColumn(table: string, column: string, definition: string) {
+      // SECURITY: Whitelist table and column names for dynamic SQL
+      const allowedTables = ['users', 'course_materials', 'students', 'programs', 'courses', 'academic_calendars', 'announcements', 'payments'];
+      const allowedColumns = ['failed_login_attempts', 'locked_until', 'uploaded_by', 'previous_grade', 'degree_level', 'file_url', 'student_id_code'];
+      
+      if (!allowedTables.includes(table) || !allowedColumns.includes(column)) {
+        console.warn(`[SECURITY] Prevented unsafe dynamic SQL: ${table}.${column}`);
+        return;
+      }
+
       try {
         const result = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
         const exists = result.some(col => col.name === column);
@@ -722,7 +753,7 @@ async function startServer() {
   });
 
   // OTP Verification for Registration
-  app.post("/api/public/send-otp", async (req, res) => {
+  app.post("/api/public/send-otp", smsLimiter, async (req, res) => {
     const { identifier, type, full_name, phone } = req.body;
     const code = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
@@ -774,8 +805,8 @@ async function startServer() {
     }
   });
 
-  // SECURITY: Public upload with file type validation
-  app.post("/api/public/upload", uploadDocuments.single("file"), (req, res) => {
+  // SECURITY: Public upload with file type validation and rate limiting
+  app.post("/api/public/upload", publicUploadLimiter, uploadDocuments.single("file"), (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
     res.json({ url: `/uploads/documents/${req.file.filename}` });
   });

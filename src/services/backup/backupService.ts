@@ -307,6 +307,19 @@ export class BackupService {
 
     for (const table of tables) {
       try {
+        // SECURITY: Strict whitelist for table names in dynamic SQL
+        const allowedTables = [
+          'branches', 'users', 'students', 'programs', 'courses',
+          'semesters', 'enrollments', 'payments', 'announcements',
+          'academic_calendars', 'audit_logs', 'fee_structures',
+          'attendance', 'scholarships', 'invoices'
+        ];
+        
+        if (!allowedTables.includes(table)) {
+          console.warn(`[SECURITY] Prevented unsafe dynamic SQL in exportAllData: ${table}`);
+          continue;
+        }
+
         exportData.tables[table] = db.prepare(`SELECT * FROM ${table}`).all();
       } catch (error) {
         console.error(`Failed to export table ${table}:`, error);

@@ -413,14 +413,14 @@ export default function Dashboard() {
   const SidebarItem = ({ id, icon: Icon, label }: any) => (
     <button
       onClick={() => setActiveTab(id)}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all ${
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-300 ${
         activeTab === id
-          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100'
-          : 'text-stone-500 hover:bg-stone-100'
+          ? 'bg-emerald-600 text-white shadow-xl shadow-emerald-100 scale-[1.02]'
+          : 'text-stone-500 hover:bg-stone-50 hover:translate-x-1'
       }`}
     >
-      <Icon size={20} />
-      <span className="font-semibold text-sm">{label}</span>
+      <Icon size={18} className={activeTab === id ? 'animate-pulse' : ''} />
+      <span className="font-bold text-sm tracking-tight">{label}</span>
     </button>
   );
 
@@ -428,83 +428,100 @@ export default function Dashboard() {
     return (
       <div className="min-h-screen bg-stone-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-stone-600 font-medium">Loading dashboard...</p>
+          <motion.div 
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+            className="w-16 h-16 border-4 border-emerald-600 border-t-transparent rounded-full mx-auto mb-6"
+          />
+          <p className="text-stone-400 font-black tracking-widest text-xs uppercase">Initializing Experience</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-stone-50 flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-stone-200 p-6 flex flex-col">
-        <div className="flex items-center gap-2 mb-10 px-2">
-          <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center text-white">
-            <GraduationCap size={18} />
+    <div className="min-h-screen bg-[#FDFDFD] flex font-sans selection:bg-emerald-100 selection:text-emerald-900">
+      {/* Sidebar - Premium Minimalist */}
+      <aside className="w-72 bg-white border-r border-stone-100 p-8 flex flex-col sticky top-0 h-screen">
+        <div className="flex items-center gap-3 mb-12 px-2 group cursor-pointer">
+          <div className="w-10 h-10 bg-stone-900 rounded-[1.25rem] flex items-center justify-center text-white transition-transform group-hover:rotate-12 duration-500">
+            <GraduationCap size={22} />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-black tracking-tight text-stone-900 leading-none">DREAMLAND</span>
-            <span className="text-[8px] font-black tracking-[0.2em] text-emerald-600 uppercase mt-0.5">College</span>
+            <span className="text-lg font-black tracking-tighter text-stone-900 leading-none">DREAMLAND</span>
+            <span className="text-[9px] font-black tracking-[0.3em] text-emerald-600 uppercase mt-1">Command Center</span>
           </div>
         </div>
 
-        <nav className="flex-1 space-y-2">
+        <nav className="flex-1 space-y-1.5 overflow-y-auto pr-2 custom-scrollbar">
+          <p className="text-[10px] font-black text-stone-300 uppercase tracking-[0.2em] mb-4 px-4">Main Navigation</p>
           {navigation.map(item => (
             <SidebarItem key={item.id} id={item.id} icon={item.icon} label={item.label} />
           ))}
         </nav>
 
-        <div className="mt-auto pt-6 border-t border-stone-100">
-          <div className="flex items-center gap-3 mb-6 px-2">
-            <div className="w-10 h-10 bg-stone-100 rounded-full flex items-center justify-center text-stone-600 font-bold">
+        <div className="mt-8 pt-8 border-t border-stone-50">
+          <div className="flex items-center gap-3 p-4 bg-stone-50 rounded-[1.5rem] mb-6 group cursor-pointer hover:bg-stone-100 transition-colors">
+            <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-black shadow-lg shadow-emerald-50 transition-transform group-hover:scale-110">
               {user?.full_name?.[0]}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-stone-900 truncate">{user?.full_name}</p>
-              <p className="text-xs text-stone-500 capitalize">{user?.role.replace('_', ' ')}</p>
+              <p className="text-sm font-black text-stone-900 truncate">{user?.full_name}</p>
+              <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">{user?.role.replace('_', ' ')}</p>
             </div>
           </div>
           <button 
             onClick={() => logout('user_initiated')}
-            className="w-full flex items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 rounded-2xl transition-all font-semibold text-sm"
+            className="w-full flex items-center gap-3 px-5 py-4 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all font-black text-xs uppercase tracking-widest"
           >
-            <LogOut size={20} />
+            <LogOut size={18} />
             {t('logout')}
           </button>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto p-10">
-        <header className="flex justify-between items-center mb-10">
-          <div>
-            <h1 className="text-3xl font-bold text-stone-900">
-              {activeTab === 'overview' ? 'Welcome back, ' + user?.full_name : t(activeTab)}
+      {/* Main Content - High Performance View */}
+      <main className="flex-1 overflow-y-auto p-12 relative">
+        <header className="flex justify-between items-start mb-12">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+          >
+            <h1 className="text-4xl font-black text-stone-900 tracking-tight">
+              {activeTab === 'overview' 
+                ? <><span className="text-stone-400 font-medium">Welcome back,</span> {user?.full_name.split(' ')[0]}</>
+                : t(activeTab)}
             </h1>
-            <p className="text-stone-500 mt-1">Here's what's happening at Dreamland College today.</p>
-          </div>
+            <div className="flex items-center gap-3 mt-2 text-stone-500">
+              <span className="text-sm font-medium">Dashboard Overview</span>
+              <span className="w-1 h-1 bg-stone-300 rounded-full"></span>
+              <span className="text-sm font-medium">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+            </div>
+          </motion.div>
+          
           <div className="flex items-center gap-4">
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
+            <div className="relative group">
+              <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-stone-400 group-focus-within:text-emerald-500 transition-colors" size={18} />
               <input 
                 type="text" 
-                placeholder="Search anything..." 
+                placeholder="Command Search..." 
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
                   handleSearch(e.target.value);
                 }}
-                className="pl-12 pr-4 py-2.5 bg-white border border-stone-200 rounded-2xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none w-64 transition-all"
+                className="pl-14 pr-6 py-4 bg-white border border-stone-100 rounded-[1.5rem] text-sm font-medium focus:ring-4 focus:ring-emerald-500/5 focus:border-emerald-500/20 outline-none w-80 shadow-sm transition-all"
               />
+              <kbd className="absolute right-4 top-1/2 -translate-y-1/2 px-2 py-1 bg-stone-50 text-stone-400 text-[10px] font-black rounded-md border border-stone-100 pointer-events-none uppercase tracking-tighter">⌘K</kbd>
             </div>
+            
             <button 
               onClick={handleOpenNotifications}
-              className="p-2.5 bg-white border border-stone-200 rounded-2xl text-stone-600 hover:bg-stone-50 transition-all relative"
+              className="p-4 bg-white border border-stone-100 rounded-[1.5rem] text-stone-600 hover:bg-stone-50 hover:scale-105 transition-all relative shadow-sm"
             >
-              <Bell size={20} />
+              <Bell size={22} />
               {unreadCount > 0 && (
-                <span className="absolute top-2 right-2 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white font-bold">
+                <span className="absolute top-3.5 right-3.5 w-5 h-5 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full border-[3px] border-white font-black animate-bounce">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
@@ -513,90 +530,118 @@ export default function Dashboard() {
         </header>
 
         {activeTab === 'overview' && (
-          <div className="space-y-8">
-            {/* Superadmin & Branch Admin Overview */}
+          <div className="space-y-10">
+            {/* KPI Section - Dynamic Glass Cards */}
             {(user?.role === 'superadmin' || user?.role === 'branch_admin') && (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {[
-                    { label: 'Total Students', value: students.length, icon: Users, color: 'bg-blue-500' },
-                    { label: 'Active Branches', value: branches.length, icon: Building2, color: 'bg-emerald-500' },
-                    { label: 'Programs', value: '12', icon: BookOpen, color: 'bg-purple-500' },
-                    { label: 'Revenue (ETB)', value: '1.2M', icon: CreditCard, color: 'bg-orange-500' }
-                  ].map((stat, i) => (
-                    <motion.div 
-                      key={i}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.1 }}
-                      className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"
-                    >
-                      <div className={`w-12 h-12 ${stat.color} rounded-2xl flex items-center justify-center text-white mb-4 shadow-lg shadow-stone-100`}>
-                        <stat.icon size={24} />
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+                {[
+                  { label: 'Total Students', value: students.length, icon: Users, color: 'emerald', trend: '+12%' },
+                  { label: 'Active Branches', value: branches.length, icon: Building2, color: 'blue', trend: 'Stable' },
+                  { label: 'Academic Programs', value: '12', icon: BookOpen, color: 'purple', trend: '+2 New' },
+                  { label: 'Annual Revenue', value: '1.2M', icon: CreditCard, color: 'stone', trend: '+8.4%' }
+                ].map((stat, i) => (
+                  <motion.div 
+                    key={i}
+                    initial={{ opacity: 0, y: 30 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.1, type: "spring", stiffness: 100 }}
+                    whileHover={{ y: -8, transition: { duration: 0.2 } }}
+                    className="glass rounded-[2rem] p-8 relative overflow-hidden group cursor-pointer"
+                  >
+                    <div className="relative z-10">
+                      <div className={`w-14 h-14 bg-stone-900 rounded-2xl flex items-center justify-center text-white mb-6 shadow-xl transition-transform group-hover:rotate-6`}>
+                        <stat.icon size={26} />
                       </div>
-                      <p className="text-sm font-medium text-stone-500">{stat.label}</p>
-                      <h3 className="text-2xl font-bold text-stone-900 mt-1">{stat.value}</h3>
-                    </motion.div>
-                  ))}
-                </div>
+                      <div className="flex justify-between items-end">
+                        <div>
+                          <p className="text-xs font-black text-stone-400 uppercase tracking-widest">{stat.label}</p>
+                          <h3 className="text-3xl font-black text-stone-900 mt-2 tracking-tight">{stat.value}</h3>
+                        </div>
+                        <div className={`text-[10px] font-black px-2 py-1 rounded-lg ${stat.trend.includes('+') ? 'bg-emerald-50 text-emerald-600' : 'bg-stone-50 text-stone-400'}`}>
+                          {stat.trend}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Abstract Background Shapes */}
+                    <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-stone-50 rounded-full opacity-50 transition-transform group-hover:scale-150 duration-700" />
+                  </motion.div>
+                ))}
+              </div>
+            )}
 
-                <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden">
-                  <div className="p-6 border-b border-stone-100 flex justify-between items-center">
-                    <h3 className="font-bold text-stone-900">Recent Students</h3>
-                    <button onClick={handleViewAllStudents} className="text-sm font-bold text-emerald-600 hover:text-emerald-700">View All</button>
+                <div className="glass rounded-[2.5rem] overflow-hidden">
+                  <div className="p-8 border-b border-stone-50 flex justify-between items-center">
+                    <div>
+                      <h3 className="text-xl font-black text-stone-900">Recent Registrations</h3>
+                      <p className="text-xs text-stone-400 font-bold uppercase tracking-widest mt-1">Latest student activity across all branches</p>
+                    </div>
+                    <button 
+                      onClick={handleViewAllStudents} 
+                      className="px-6 py-3 bg-stone-900 text-white text-xs font-black uppercase tracking-widest rounded-xl hover:bg-emerald-600 transition-colors shadow-lg shadow-stone-100"
+                    >
+                      View Directory
+                    </button>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left">
                       <thead>
-                        <tr className="bg-stone-50/50 text-stone-500 text-xs uppercase tracking-wider">
-                          <th className="px-6 py-4 font-semibold">Student Name</th>
-                          <th className="px-6 py-4 font-semibold">ID Code</th>
-                          <th className="px-6 py-4 font-semibold">Branch</th>
-                          <th className="px-6 py-4 font-semibold">Program</th>
-                          <th className="px-6 py-4 font-semibold">Status</th>
-                          <th className="px-6 py-4 font-semibold"></th>
+                        <tr className="bg-stone-50/30 text-stone-400 text-[10px] font-black uppercase tracking-[0.2em]">
+                          <th className="px-8 py-5">Profile</th>
+                          <th className="px-8 py-5">Credential</th>
+                          <th className="px-8 py-5">Location</th>
+                          <th className="px-8 py-5">Curriculum</th>
+                          <th className="px-8 py-5 text-center">Security Status</th>
+                          <th className="px-8 py-5"></th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-stone-100">
+                      <tbody className="divide-y divide-stone-50">
                         {students.slice(0, 5).map((student, i) => (
-                          <tr key={i} className="hover:bg-stone-50 transition-colors group">
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 bg-stone-100 rounded-full flex items-center justify-center text-stone-600 text-xs font-bold">
+                          <tr key={i} className="hover:bg-stone-50/50 transition-colors group">
+                            <td className="px-8 py-5">
+                              <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-stone-100 rounded-2xl flex items-center justify-center text-stone-900 text-sm font-black transition-transform group-hover:scale-110 group-hover:bg-emerald-50 group-hover:text-emerald-600">
                                   {student.full_name?.[0]}
                                 </div>
-                                <span className="text-sm font-semibold text-stone-900">{student.full_name}</span>
+                                <div>
+                                  <span className="text-sm font-black text-stone-900 block">{student.full_name}</span>
+                                  <span className="text-[10px] text-stone-400 font-bold uppercase tracking-tighter">Registered today</span>
+                                </div>
                               </div>
                             </td>
-                            <td className="px-6 py-4 text-sm text-stone-600 font-mono">{student.student_id_code || 'PENDING'}</td>
-                            <td className="px-6 py-4 text-sm text-stone-600">{student.branch_name}</td>
-                            <td className="px-6 py-4 text-sm text-stone-600">
-                              {student.program_name} 
-                              {student.program_degree && <span className="text-[10px] ml-1 px-1.5 py-0.5 bg-stone-100 rounded text-stone-500 font-bold uppercase">{student.program_degree}</span>}
+                            <td className="px-8 py-5">
+                              <span className="text-xs font-bold text-stone-600 font-mono bg-stone-100 px-2 py-1 rounded-md">{student.student_id_code || 'AUTH_PENDING'}</span>
                             </td>
-                            <td className="px-6 py-4">
-                              <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                            <td className="px-8 py-5">
+                              <div className="flex items-center gap-2">
+                                <Building2 size={14} className="text-stone-300" />
+                                <span className="text-sm font-bold text-stone-600">{student.branch_name}</span>
+                              </div>
+                            </td>
+                            <td className="px-8 py-5">
+                              <span className="text-sm font-bold text-stone-900">{student.program_name}</span>
+                              {student.program_degree && (
+                                <span className="ml-2 text-[9px] px-2 py-0.5 bg-emerald-50 text-emerald-600 font-black rounded uppercase">
+                                  {student.program_degree}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-8 py-5 text-center">
+                              <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
                                 student.academic_status === 'good_standing' 
                                   ? 'bg-emerald-50 text-emerald-600' 
                                   : 'bg-red-50 text-red-600'
                               }`}>
+                                <div className={`w-1.5 h-1.5 rounded-full ${student.academic_status === 'good_standing' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
                                 {student.academic_status?.replace('_', ' ')}
                               </span>
                             </td>
-                            <td className="px-6 py-4 text-right">
-                              <button onClick={() => handleViewStudentDetails(student)} className="p-1.5 text-stone-400 hover:text-stone-600 transition-colors">
-                                <MoreVertical size={18} />
+                            <td className="px-8 py-5 text-right">
+                              <button onClick={() => handleViewStudentDetails(student)} className="p-2 text-stone-300 hover:text-stone-900 transition-colors">
+                                <ChevronRight size={20} />
                               </button>
                             </td>
                           </tr>
                         ))}
-                        {students.length === 0 && (
-                          <tr>
-                            <td colSpan={6} className="px-6 py-10 text-center text-stone-500 text-sm">
-                              No students found.
-                            </td>
-                          </tr>
-                        )}
                       </tbody>
                     </table>
                   </div>

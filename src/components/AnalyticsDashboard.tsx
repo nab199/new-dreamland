@@ -72,87 +72,124 @@ export default function AnalyticsDashboard() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Chart Selection Tabs */}
-      <div className="flex flex-wrap gap-2">
+    <div className="space-y-8">
+      {/* Chart Selection Tabs - Premium Style */}
+      <div className="flex flex-wrap gap-3 bg-stone-100/50 p-1.5 rounded-2xl w-fit">
         {charts.map((chart) => (
           <button
             key={chart.id}
             onClick={() => setActiveChart(chart.id as any)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl transition-all duration-300 ${
               activeChart === chart.id
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 hover:bg-gray-200'
+                ? 'bg-white text-emerald-600 shadow-sm font-bold scale-105'
+                : 'text-stone-500 hover:text-stone-900 font-medium'
             }`}
           >
-            <chart.icon className="w-5 h-5" />
-            <span className="font-medium">{chart.label}</span>
+            <chart.icon className={`w-4 h-4 ${activeChart === chart.id ? 'text-emerald-500' : ''}`} />
+            <span className="text-sm">{chart.label}</span>
           </button>
         ))}
       </div>
 
-      {/* Chart Content */}
+      {/* Chart Content - Glassmorphism Card */}
       <motion.div
         key={activeChart}
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-white rounded-xl shadow-lg p-6"
+        initial={{ opacity: 0, scale: 0.98, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+        className="glass rounded-[2.5rem] p-8"
       >
         {/* Enrollment Trends */}
         {activeChart === 'enrollment' && (
-          <div>
-            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <TrendingUp className="w-6 h-6 text-blue-600" />
-              Enrollment Trends (Last 12 Months)
-            </h3>
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="flex justify-between items-start mb-8">
+              <div>
+                <h3 className="text-2xl font-black text-stone-900 flex items-center gap-3">
+                  <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                    <TrendingUp className="w-6 h-6" />
+                  </div>
+                  Enrollment Trends
+                </h3>
+                <p className="text-stone-500 mt-1 ml-12">Tracking student growth over the last 12 months</p>
+              </div>
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-full text-xs font-black">
+                <TrendingUp size={14} />
+                +12.5% GROWTH
+              </div>
+            </div>
+            
             {data.enrollmentTrends.length === 0 ? (
-              <p className="text-gray-500 text-center py-12">No enrollment data available</p>
+              <div className="flex flex-col items-center justify-center py-20 bg-stone-50/50 rounded-[2rem] border-2 border-dashed border-stone-200">
+                <Users className="w-12 h-12 text-stone-300 mb-4" />
+                <p className="text-stone-400 font-medium text-center">No enrollment data available for this period</p>
+              </div>
             ) : (
-              <ResponsiveContainer width="100%" height={400}>
-                <AreaChart data={data.enrollmentTrends}>
-                  <defs>
-                    <linearGradient id="colorEnrollment" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Area 
-                    type="monotone" 
-                    dataKey="count" 
-                    name="Students" 
-                    stroke="#3B82F6" 
-                    fillOpacity={1} 
-                    fill="url(#colorEnrollment)" 
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              <div className="h-[400px] w-full mt-4">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={data.enrollmentTrends}>
+                    <defs>
+                      <linearGradient id="colorEnrollment" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.15}/>
+                        <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                    <XAxis 
+                      dataKey="month" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{fill: '#6B7280', fontSize: 12}}
+                      dy={10}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{fill: '#6B7280', fontSize: 12}}
+                    />
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '12px' }}
+                      cursor={{ stroke: '#10B981', strokeWidth: 2, strokeDasharray: '5 5' }}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="count" 
+                      name="Students" 
+                      stroke="#10B981" 
+                      strokeWidth={3}
+                      fillOpacity={1} 
+                      fill="url(#colorEnrollment)" 
+                      animationDuration={2000}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
             )}
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-3 gap-4 mt-6">
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <p className="text-sm text-gray-600">Current Month</p>
-                <p className="text-2xl font-bold text-blue-600">
-                  {data.enrollmentTrends[data.enrollmentTrends.length - 1]?.count || 0}
-                </p>
-              </div>
-              <div className="p-4 bg-green-50 rounded-lg">
-                <p className="text-sm text-gray-600">Previous Month</p>
-                <p className="text-2xl font-bold text-green-600">
+            {/* Stats Cards - Premium Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-10">
+              <motion.div whileHover={{y: -5}} className="p-6 bg-white border border-stone-100 rounded-3xl shadow-sm">
+                <p className="text-xs font-bold text-stone-400 uppercase tracking-widest">Current Month</p>
+                <div className="flex items-end gap-2 mt-1">
+                  <p className="text-3xl font-black text-stone-900">
+                    {data.enrollmentTrends[data.enrollmentTrends.length - 1]?.count || 0}
+                  </p>
+                  <span className="text-emerald-500 text-xs font-bold mb-1.5 flex items-center gap-0.5">
+                    <TrendingUp size={12} /> 4.2%
+                  </span>
+                </div>
+              </motion.div>
+              <motion.div whileHover={{y: -5}} className="p-6 bg-white border border-stone-100 rounded-3xl shadow-sm">
+                <p className="text-xs font-bold text-stone-400 uppercase tracking-widest">Previous Month</p>
+                <p className="text-3xl font-black text-stone-900 mt-1">
                   {data.enrollmentTrends[data.enrollmentTrends.length - 2]?.count || 0}
                 </p>
-              </div>
-              <div className="p-4 bg-purple-50 rounded-lg">
-                <p className="text-sm text-gray-600">Average</p>
-                <p className="text-2xl font-bold text-purple-600">
+              </motion.div>
+              <motion.div whileHover={{y: -5}} className="p-6 bg-stone-900 rounded-3xl shadow-lg shadow-stone-200">
+                <p className="text-xs font-bold text-stone-400 uppercase tracking-widest">Yearly Average</p>
+                <p className="text-3xl font-black text-white mt-1">
                   {Math.round(data.enrollmentTrends.reduce((sum: number, t: any) => sum + t.count, 0) / (data.enrollmentTrends.length || 1))}
                 </p>
-              </div>
+              </motion.div>
             </div>
           </div>
         )}
