@@ -1,16 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
   ActivityIndicator,
   Image,
+  ScrollView,
+  StyleSheet,
+  Text,
   TouchableOpacity,
+  View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { apiService } from '../services/api';
 import { Student } from '../types';
+
+const USAGE_ITEMS = [
+  { code: 'LIB', label: 'Library Access' },
+  { code: 'ENT', label: 'Campus Entry' },
+  { code: 'EXM', label: 'Exam Verification' },
+  { code: 'EVT', label: 'Campus Events' },
+];
 
 export default function DigitalIDScreen() {
   const { user } = useAuth();
@@ -28,7 +35,7 @@ export default function DigitalIDScreen() {
         const response = await apiService.getStudents();
         if (response.data && response.data.length > 0) {
           const studentData = response.data.find(
-            (s: Student) => s.user_id === user.id
+            (currentStudent: Student) => currentStudent.user_id === user.id
           );
           if (studentData) {
             setStudent(studentData);
@@ -43,10 +50,8 @@ export default function DigitalIDScreen() {
   };
 
   const generateQRCode = () => {
-    // In production, generate actual QR code with student ID
-    // Using a placeholder for now
-    const studentId = student?.id || user?.id || 0;
-    return `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=STUDENT_${studentId}`;
+    const currentStudentId = student?.id || user?.id || 0;
+    return `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=STUDENT_${currentStudentId}`;
   };
 
   if (isLoading) {
@@ -60,28 +65,31 @@ export default function DigitalIDScreen() {
   const fullName = student
     ? `${student.first_name} ${student.last_name}`
     : user?.full_name || 'N/A';
-
-  const studentId = student?.id || user?.id || 'N/A';
+  const currentStudentId = student?.id || user?.id || 'N/A';
   const program = student?.program_degree || 'Not specified';
   const enrollmentYear = student?.enrollment_year || new Date().getFullYear();
-  const validUntil = enrollmentYear + 4; // Assuming 4-year program
+  const validUntil = enrollmentYear + 4;
+  const initials = fullName
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Digital ID Card</Text>
-        <Text style={styles.headerSubtitle}>
-          Tap to flip • Valid student identification
-        </Text>
+        <Text style={styles.headerSubtitle}>Tap to flip | Valid student identification</Text>
       </View>
 
       <TouchableOpacity
         style={styles.cardContainer}
-        onPress={() => setShowBack(!showBack)}
+        onPress={() => setShowBack((current) => !current)}
         activeOpacity={0.9}
       >
         {!showBack ? (
-          // Front of ID Card
           <View style={[styles.card, styles.cardFront]}>
             <View style={styles.cardHeader}>
               <Text style={styles.institutionName}>Dreamland College</Text>
@@ -90,9 +98,7 @@ export default function DigitalIDScreen() {
 
             <View style={styles.photoSection}>
               <View style={styles.photoPlaceholder}>
-                <Text style={styles.photoInitials}>
-                  {fullName.split(' ').map(n => n[0]).join('').toUpperCase()}
-                </Text>
+                <Text style={styles.photoInitials}>{initials || 'NA'}</Text>
               </View>
             </View>
 
@@ -103,7 +109,7 @@ export default function DigitalIDScreen() {
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Student ID</Text>
-                <Text style={styles.infoValue}>DL-{String(studentId).padStart(6, '0')}</Text>
+                <Text style={styles.infoValue}>DL-{String(currentStudentId).padStart(6, '0')}</Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Program</Text>
@@ -120,14 +126,10 @@ export default function DigitalIDScreen() {
             </View>
           </View>
         ) : (
-          // Back of ID Card
           <View style={[styles.card, styles.cardBack]}>
             <View style={styles.qrSection}>
               <View style={styles.qrCodeContainer}>
-                <Image
-                  source={{ uri: generateQRCode() }}
-                  style={styles.qrCode}
-                />
+                <Image source={{ uri: generateQRCode() }} style={styles.qrCode} />
               </View>
               <Text style={styles.qrLabel}>Scan for verification</Text>
             </View>
@@ -140,56 +142,42 @@ export default function DigitalIDScreen() {
                 {student?.email || user?.email || 'N/A'}
               </Text>
               <Text style={styles.backInfoLabel}>Phone</Text>
-              <Text style={styles.backInfoValue}>
-                {student?.phone || 'N/A'}
-              </Text>
+              <Text style={styles.backInfoValue}>{student?.phone || 'N/A'}</Text>
             </View>
 
             <View style={styles.termsSection}>
               <Text style={styles.termsText}>
-                This ID card is non-transferable. If found, please return to
+                This ID card is non-transferable. If found, please return it to the
                 Dreamland College Administration Office.
               </Text>
             </View>
 
             <View style={styles.cardFooter}>
-              <Text style={styles.footerText}>
-                © 2026 Dreamland College
-              </Text>
+              <Text style={styles.footerText}>(c) 2026 Dreamland College</Text>
             </View>
           </View>
         )}
-      </View>
+      </TouchableOpacity>
 
       <View style={styles.usageSection}>
         <Text style={styles.usageTitle}>Where to use your Digital ID</Text>
         <View style={styles.usageGrid}>
-          <View style={styles.usageItem}>
-            <Text style={styles.usageIcon}>📚</Text>
-            <Text style={styles.usageLabel}>Library Access</Text>
-          </View>
-          <View style={styles.usageItem}>
-            <Text style={styles.usageIcon}>🏫</Text>
-            <Text style={styles.usageLabel}>Campus Entry</Text>
-          </View>
-          <View style={styles.usageItem}>
-            <Text style={styles.usageIcon}>📝</Text>
-            <Text style={styles.usageLabel}>Exam Verification</Text>
-          </View>
-          <View style={styles.usageItem}>
-            <Text style={styles.usageIcon}>🎫</Text>
-            <Text style={styles.usageLabel}>Campus Events</Text>
-          </View>
+          {USAGE_ITEMS.map((item) => (
+            <View key={item.code} style={styles.usageItem}>
+              <Text style={styles.usageIcon}>{item.code}</Text>
+              <Text style={styles.usageLabel}>{item.label}</Text>
+            </View>
+          ))}
         </View>
       </View>
 
       <View style={styles.infoBox}>
-        <Text style={styles.infoBoxTitle}>ℹ️ How to use</Text>
+        <Text style={styles.infoBoxTitle}>How to use</Text>
         <Text style={styles.infoBoxText}>
-          • Tap the card to flip and show the QR code{'\n'}
-          • Present QR code for scanning at verification points{'\n'}
-          • Keep your phone charged when visiting campus{'\n'}
-          • Report lost devices immediately to administration
+          - Tap the card to flip and show the QR code{'\n'}
+          - Present the QR code for scanning at verification points{'\n'}
+          - Keep your phone charged when visiting campus{'\n'}
+          - Report lost devices immediately to administration
         </Text>
       </View>
     </ScrollView>
@@ -226,7 +214,7 @@ const styles = StyleSheet.create({
   },
   cardContainer: {
     margin: 20,
-    aspectRatio: 1.586, // Standard ID card ratio
+    aspectRatio: 1.586,
   },
   card: {
     borderRadius: 16,
@@ -274,7 +262,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
-    borderColor: #059669,
+    borderColor: '#059669',
   },
   photoInitials: {
     fontSize: 36,
@@ -302,6 +290,8 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontWeight: '600',
     textAlign: 'right',
+    flexShrink: 1,
+    paddingLeft: 12,
   },
   cardFooter: {
     backgroundColor: '#F9FAFB',
@@ -384,7 +374,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   usageIcon: {
-    fontSize: 24,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#059669',
     marginBottom: 4,
   },
   usageLabel: {

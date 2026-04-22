@@ -40,15 +40,20 @@ interface SidebarProps {
   language: 'am' | 'en';
   onNavigate: (id: string) => void;
   onLogout: () => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 /**
  * Sidebar component for Dreamland College
  * Implements High-Density Modular Layout with Habesha aesthetic.
  */
-const Sidebar: React.FC<SidebarProps> = ({ activeId, language, onNavigate, onLogout }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activeId, language, onNavigate, onLogout, isOpen, onClose }) => {
   return (
-    <aside className="w-[280px] h-screen bg-[var(--surface)] flex flex-col shadow-[20px_0_50px_rgba(0,0,0,0.05)] relative overflow-hidden border-r border-[var(--border)]">
+    <aside className={`
+      fixed inset-y-0 left-0 z-50 w-[280px] bg-[var(--surface)] flex flex-col shadow-[20px_0_50px_rgba(0,0,0,0.05)] border-r border-[var(--border)] transition-transform duration-300 lg:relative lg:translate-x-0
+      ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+    `}>
       
       {/* Brand Header */}
       <div className="p-8 mb-4 flex items-center gap-3">

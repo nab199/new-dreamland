@@ -403,9 +403,4 @@ export default function UserManagement() {
       )}
     </div>
   );
-}>
-        </div>
-      )}
-    </div>
-  );
 }

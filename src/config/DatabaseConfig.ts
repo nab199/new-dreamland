@@ -73,8 +73,8 @@ function logDatabaseError(log: DatabaseErrorLog): void {
    * Transaction client interface
    */
 export interface TransactionClient {
-  all<T = unknown>(sql: string, params?: unknown[]): Promise<T[]>;
-  get<T = unknown>(sql: string, params?: unknown[]): Promise<T | undefined>;
+  all<T = any>(sql: string, params?: unknown[]): Promise<T[]>;
+  get<T = any>(sql: string, params?: unknown[]): Promise<T | undefined>;
   run(sql: string, params?: unknown[]): Promise<DatabaseWriteResult>;
   strictWrite(
     operation: 'INSERT' | 'UPDATE' | 'DELETE',
@@ -88,17 +88,13 @@ export interface TransactionClient {
  * Unified Database Interface with Strict Type Checking
  */
 export interface DatabaseInterface {
-  all<T>(sql: string, params?: unknown[]): Promise<T[]>;
-  get<T>(sql: string, params?: unknown[]): Promise<T | undefined>;
+  all<T = any>(sql: string, params?: unknown[]): Promise<T[]>;
+  get<T = any>(sql: string, params?: unknown[]): Promise<T | undefined>;
   run(sql: string, params?: unknown[]): Promise<DatabaseWriteResult>;
   exec(sql: string): Promise<void>;
-  transaction(callback: (client: TransactionClient) => Promise<void>): Promise<void>;
+  transaction(callback: any): any;
   strictWrite(operation: 'INSERT' | 'UPDATE' | 'DELETE', tableName: string, sql: string, params?: unknown[]): Promise<DatabaseWriteResult>;
-  prepare(sql: string): {
-    all<T>(...params: unknown[]): Promise<T[]>;
-    get<T>(...params: unknown[]): Promise<T | undefined>;
-    run(...params: unknown[]): Promise<DatabaseWriteResult>;
-  };
+  prepare(sql: string): any;
   close(): Promise<void>;
 }
 
@@ -107,7 +103,7 @@ export const db: DatabaseInterface = {
    * Run a query that returns multiple rows.
    * Generic type T ensures type safety for returned data.
    */
-  async all<T = unknown>(sql: string, params: unknown[] = []): Promise<T[]> {
+  async all<T = any>(sql: string, params: unknown[] = []): Promise<T[]> {
     try {
       if (usePostgres) {
         if (!pool) throw new Error('PostgreSQL pool not initialized');
@@ -135,7 +131,7 @@ export const db: DatabaseInterface = {
    * Run a query that returns a single row.
    * Returns undefined if no row found.
    */
-  async get<T = unknown>(sql: string, params: unknown[] = []): Promise<T | undefined> {
+  async get<T = any>(sql: string, params: unknown[] = []): Promise<T | undefined> {
     try {
       if (usePostgres) {
         if (!pool) throw new Error('PostgreSQL pool not initialized');
@@ -229,91 +225,94 @@ export const db: DatabaseInterface = {
    * Transaction helper with strict typing
    * Ensures atomic operations with proper error handling
    */
-  async transaction(callback: (client: TransactionClient) => Promise<void>): Promise<void> {
+  transaction(callback: any): any {
     if (usePostgres) {
-      if (!pool) throw new Error('PostgreSQL pool not initialized');
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        // Transaction client with same interface
-        const txDb: TransactionClient = {
-            all: async <T = unknown>(sql: string, params: unknown[] = []): Promise<T[]> => {
-                const result = await client.query(convertSql(sql), params);
-                return result.rows as T[];
-            },
-            get: async <T = unknown>(sql: string, params: unknown[] = []): Promise<T | undefined> => {
-                const result = await client.query(convertSql(sql), params);
-                return result.rows[0] as T | undefined;
-            },
-            run: async (sql: string, params: unknown[] = []): Promise<DatabaseWriteResult> => {
-                let s = convertSql(sql);
-                if (s.trim().toUpperCase().startsWith('INSERT') && !s.toUpperCase().includes('RETURNING')) {
-                    s += ' RETURNING id';
-                }
-                const r = await client.query(s, params);
-                return { lastInsertRowid: r.rows[0]?.id || r.rowCount || 0, changes: r.rowCount || 0 };
-            },
-            strictWrite: async (operation: 'INSERT' | 'UPDATE' | 'DELETE', tableName: string, sql: string, params: unknown[] = []): Promise<DatabaseWriteResult> => {
-                const logId = `TX-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-                console.log(`[${logId}] TRANSACTION ${operation} on ${tableName}`);
-                return this.run(sql, params);
-            }
-        };
-        await callback(txDb);
-        await client.query('COMMIT');
-      } catch (e: unknown) {
-        await client.query('ROLLBACK');
-        const errorMessage = e instanceof Error ? e.message : 'Transaction failed';
-        logDatabaseError({
-          timestamp: new Date().toISOString(),
-          operation: 'transaction',
-          error: errorMessage,
-          databaseType: 'postgres'
-        });
-        throw e;
-      } finally {
-        client.release();
-      }
-    } else {
-      if (!sqliteDb) throw new Error('SQLite database not initialized');
-      try {
-        const transaction = sqliteDb.transaction((cb: (db: TransactionClient) => Promise<void>) => {
-          // Wrap synchronous SQLite operations
+      return (async () => {
+        if (!pool) throw new Error('PostgreSQL pool not initialized');
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
           const txDb: TransactionClient = {
-            all: async <T = unknown>(sql: string, params: unknown[] = []): Promise<T[]> => {
-                if (!sqliteDb) throw new Error('SQLite not initialized');
-                return sqliteDb.prepare(sql).all(...params) as T[];
+            all: async <T = any>(sql: string, params: unknown[] = []): Promise<T[]> => {
+              const result = await client.query(convertSql(sql), params);
+              return result.rows as T[];
             },
-            get: async <T = unknown>(sql: string, params: unknown[] = []): Promise<T | undefined> => {
-                if (!sqliteDb) throw new Error('SQLite not initialized');
-                return sqliteDb.prepare(sql).get(...params) as T | undefined;
+            get: async <T = any>(sql: string, params: unknown[] = []): Promise<T | undefined> => {
+              const result = await client.query(convertSql(sql), params);
+              return result.rows[0] as T | undefined;
             },
             run: async (sql: string, params: unknown[] = []): Promise<DatabaseWriteResult> => {
-                if (!sqliteDb) throw new Error('SQLite not initialized');
-                const result = sqliteDb.prepare(sql).run(...params);
-                return { lastInsertRowid: result.lastInsertRowid, changes: result.changes };
+              let s = convertSql(sql);
+              if (s.trim().toUpperCase().startsWith('INSERT') && !s.toUpperCase().includes('RETURNING')) {
+                s += ' RETURNING id';
+              }
+              const r = await client.query(s, params);
+              return { lastInsertRowid: r.rows[0]?.id || r.rowCount || 0, changes: r.rowCount || 0 };
             },
             strictWrite: async (operation: 'INSERT' | 'UPDATE' | 'DELETE', tableName: string, sql: string, params: unknown[] = []): Promise<DatabaseWriteResult> => {
-                const logId = `TX-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-                console.log(`[${logId}] TRANSACTION ${operation} on ${tableName}`);
-                return this.run(sql, params);
+              const logId = `TX-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+              console.log(`[${logId}] TRANSACTION ${operation} on ${tableName}`);
+              return txDb.run(sql, params);
             }
           };
-          return cb(txDb);
-        });
-        await transaction(async (txDb) => {
           await callback(txDb);
-        });
-      } catch (e: unknown) {
-        const errorMessage = e instanceof Error ? e.message : 'Transaction failed';
-        logDatabaseError({
-          timestamp: new Date().toISOString(),
-          operation: 'transaction',
-          error: errorMessage,
-          databaseType: 'sqlite'
-        });
-        throw e;
+          await client.query('COMMIT');
+        } catch (e: unknown) {
+          await client.query('ROLLBACK');
+          const errorMessage = e instanceof Error ? e.message : 'Transaction failed';
+          logDatabaseError({
+            timestamp: new Date().toISOString(),
+            operation: 'transaction',
+            error: errorMessage,
+            databaseType: 'postgres'
+          });
+          throw e;
+        } finally {
+          client.release();
+        }
+      })();
+    } else {
+      if (!sqliteDb) throw new Error('SQLite database not initialized');
+      const isAsyncCallback = callback?.constructor?.name === 'AsyncFunction';
+
+      if (!isAsyncCallback) {
+        return sqliteDb.transaction(callback);
       }
+
+      return (async () => {
+        try {
+          const txDb: TransactionClient = {
+            all: async <T = any>(sql: string, params: unknown[] = []): Promise<T[]> => {
+              if (!sqliteDb) throw new Error('SQLite not initialized');
+              return sqliteDb.prepare(sql).all(...params) as T[];
+            },
+            get: async <T = any>(sql: string, params: unknown[] = []): Promise<T | undefined> => {
+              if (!sqliteDb) throw new Error('SQLite not initialized');
+              return sqliteDb.prepare(sql).get(...params) as T | undefined;
+            },
+            run: async (sql: string, params: unknown[] = []): Promise<DatabaseWriteResult> => {
+              if (!sqliteDb) throw new Error('SQLite not initialized');
+              const result = sqliteDb.prepare(sql).run(...params);
+              return { lastInsertRowid: result.lastInsertRowid, changes: result.changes };
+            },
+            strictWrite: async (operation: 'INSERT' | 'UPDATE' | 'DELETE', tableName: string, sql: string, params: unknown[] = []): Promise<DatabaseWriteResult> => {
+              const logId = `TX-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+              console.log(`[${logId}] TRANSACTION ${operation} on ${tableName}`);
+              return txDb.run(sql, params);
+            }
+          };
+          await callback(txDb);
+        } catch (e: unknown) {
+          const errorMessage = e instanceof Error ? e.message : 'Transaction failed';
+          logDatabaseError({
+            timestamp: new Date().toISOString(),
+            operation: 'transaction',
+            error: errorMessage,
+            databaseType: 'sqlite'
+          });
+          throw e;
+        }
+      })();
     }
   },
 
@@ -356,7 +355,7 @@ export const db: DatabaseInterface = {
     }
   },
 
-  prepare(sql: string) {
+  prepare(sql: string): any {
     if (!usePostgres && sqliteDb) {
       return sqliteDb.prepare(sql);
     }

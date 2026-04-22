@@ -5,6 +5,8 @@ import { ToastProvider } from './context/ToastContext';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import StudentRegistration from './pages/StudentRegistration';
+import LandingPage from './pages/LandingPage';
+import PublicRegistration from './pages/PublicRegistration';
 import ProfileSettings from './components/ProfileSettings';
 import OfflineIndicator from './components/OfflineIndicator';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
@@ -39,7 +41,9 @@ export default function App() {
       <ToastProvider>
         <BrowserRouter>
           <Routes>
+            <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/public-registration" element={<PublicRegistration />} />
             <Route
               path="/dashboard/*"
               element={
@@ -65,7 +69,7 @@ export default function App() {
               }
             />
             {/* Fallback */}
-            <Route path="*" element={<Navigate to="/login" />} />
+            <Route path="*" element={<Navigate to="/" />} />
           </Routes>
           {/* Offline indicator shown on all pages */}
           <OfflineIndicator position="top" showDetails={false} />

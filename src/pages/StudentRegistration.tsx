@@ -22,6 +22,11 @@ export default function StudentRegistration() {
     educational_history: '', previous_grade: '', password: ''
   });
 
+  const availablePrograms = React.useMemo(() => {
+    if (!formData.program_degree) return [];
+    return programs.filter((program) => program.degree_level === formData.program_degree);
+  }, [formData.program_degree, programs]);
+
   useEffect(() => {
     const fetchData = async () => {
       const headers = { Authorization: `Bearer ${token}` };
@@ -37,6 +42,14 @@ export default function StudentRegistration() {
     };
     fetchData();
   }, [token]);
+
+  useEffect(() => {
+    setFormData((prev) => {
+      if (!prev.program_id) return prev;
+      const stillAvailable = availablePrograms.some((program) => String(program.id) === String(prev.program_id));
+      return stillAvailable ? prev : { ...prev, program_id: '' };
+    });
+  }, [availablePrograms]);
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
@@ -104,7 +117,7 @@ export default function StudentRegistration() {
             
             <div>
               <label className="block text-sm font-semibold text-stone-700 mb-2">Program Degree</label>
-              <select name="program_degree" value={formData.program_degree} onChange={(e) => setFormData({...formData, program_degree: e.target.value})} className={`w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-2xl outline-none`} required>
+              <select name="program_degree" value={formData.program_degree} onChange={(e) => setFormData({...formData, program_degree: e.target.value, program_id: ''})} className={`w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-2xl outline-none`} required>
                 <option value="">Select Level</option>
                 {['Masters', 'Degree', 'Diploma', 'Short Term', 'Certificate'].map(d => <option key={d} value={d}>{d}</option>)}
               </select>
@@ -114,7 +127,7 @@ export default function StudentRegistration() {
               <label className="block text-sm font-semibold text-stone-700 mb-2">Program</label>
               <select name="program_id" value={formData.program_id} onChange={(e) => setFormData({...formData, program_id: e.target.value})} className={`w-full px-4 py-3 bg-stone-50 border ${errors.program_id ? 'border-red-500' : 'border-stone-200'} rounded-2xl outline-none`} required disabled={!formData.program_degree}>
                 <option value="">{formData.program_degree ? 'Select Program' : 'Select Level First'}</option>
-                {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {availablePrograms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
 
@@ -177,4 +190,3 @@ const AddressFields = ({ isAddressOpen, setIsAddressOpen, formData, setFormData,
     </AnimatePresence>
   </div>
 );
-

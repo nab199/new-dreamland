@@ -7,8 +7,10 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "lint": "tsc --noEmit -p tsconfig.web.json",
+    "lint:mobile": "tsc --noEmit -p mobile-app/tsconfig.json",
+    "lint:server": "tsc --noEmit -p tsconfig.server.json"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

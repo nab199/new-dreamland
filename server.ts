@@ -524,8 +524,68 @@ async function seedData() {
   const programCount = await db.get("SELECT COUNT(*) as count FROM programs") as { count: number };
   if (programCount.count === 0) {
     console.log("🌱 Seeding default programs...");
-    await db.run("INSERT INTO programs (name, code, duration_years, total_credits) VALUES (?, ?, ?, ?)", ["Computer Science", "CS", 4, 147]);
-    await db.run("INSERT INTO programs (name, code, duration_years, total_credits) VALUES (?, ?, ?, ?)", ["Accounting & Finance", "ACC", 3, 110]);
+    await db.run("INSERT INTO programs (name, code, duration_years, total_credits, degree_level) VALUES (?, ?, ?, ?, ?)", ["Computer Science", "CS", 4, 147, "Degree"]);
+    await db.run("INSERT INTO programs (name, code, duration_years, total_credits, degree_level) VALUES (?, ?, ?, ?, ?)", ["Accounting & Finance", "ACC", 3, 110, "Degree"]);
+  }
+
+  await db.run("UPDATE programs SET degree_level = 'Degree' WHERE degree_level IS NULL AND code IN ('CS', 'ACC')");
+  await db.run("UPDATE courses SET degree_level = 'Degree' WHERE degree_level IS NULL AND code IN ('CS101', 'CS102')");
+
+  const defaultPrograms = [
+    ["DIT", "Information Technology Diploma", 3, 96, "Diploma"],
+    ["DBA", "Business Administration Diploma", 3, 92, "Diploma"],
+    ["SCB", "Computer Basics Short Course", 1, 12, "Short Term"],
+    ["SDM", "Digital Marketing Short Course", 1, 9, "Short Term"],
+    ["MBA", "Master of Business Administration", 2, 36, "Masters"]
+  ];
+
+  for (const [code, name, durationYears, totalCredits, degreeLevel] of defaultPrograms) {
+    const existing = await db.get("SELECT id FROM programs WHERE code = ?", [code]);
+    if (existing) {
+      await db.run("UPDATE programs SET degree_level = COALESCE(degree_level, ?) WHERE code = ?", [degreeLevel, code]);
+    } else {
+      await db.run(
+        "INSERT INTO programs (name, code, duration_years, total_credits, degree_level) VALUES (?, ?, ?, ?, ?)",
+        [name, code, durationYears, totalCredits, degreeLevel]
+      );
+    }
+  }
+
+  const defaultCourses = [
+    ["CS101", "Introduction to Programming", 3, "Degree"],
+    ["CS102", "Data Structures", 4, "Degree"],
+    ["ACC201", "Financial Accounting", 3, "Degree"],
+    ["DIT101", "Computer Hardware Fundamentals", 3, "Diploma"],
+    ["DIT102", "Networking Essentials", 3, "Diploma"],
+    ["DBA101", "Office Administration", 3, "Diploma"],
+    ["SCB101", "Computer Basics", 2, "Short Term"],
+    ["SCB102", "Internet and Email Skills", 1, "Short Term"],
+    ["SDM101", "Digital Marketing Foundations", 2, "Short Term"],
+    ["MBA701", "Managerial Economics", 3, "Masters"],
+    ["MBA702", "Strategic Management", 3, "Masters"]
+  ];
+
+  for (const [code, title, credits, degreeLevel] of defaultCourses) {
+    const existing = await db.get("SELECT id FROM courses WHERE code = ?", [code]);
+    if (existing) {
+      await db.run("UPDATE courses SET degree_level = COALESCE(degree_level, ?) WHERE code = ?", [degreeLevel, code]);
+    } else {
+      await db.run(
+        "INSERT INTO courses (code, title, credits, prerequisites, is_auditable, degree_level) VALUES (?, ?, ?, ?, ?, ?)",
+        [code, title, credits, null, 0, degreeLevel]
+      );
+    }
+  }
+
+  const defaultSemester = await db.get("SELECT id FROM academic_calendars ORDER BY id ASC LIMIT 1") as { id?: number } | undefined;
+  if (defaultSemester?.id) {
+    const allCourses = await db.all("SELECT id FROM courses") as { id: number }[];
+    for (const course of allCourses) {
+      const offeringExists = await db.get("SELECT id FROM course_offerings WHERE course_id = ? AND semester_id = ?", [course.id, defaultSemester.id]);
+      if (!offeringExists) {
+        await db.run("INSERT INTO course_offerings (course_id, semester_id, capacity) VALUES (?, ?, ?)", [course.id, defaultSemester.id, 30]);
+      }
+    }
   }
 
   const hashedPassword = await bcrypt.hash("nabiot123", 10);
@@ -752,57 +812,15 @@ async function startServer() {
     }
   });
 
-  // OTP Verification for Registration
+  // OTP Verification for Registration (DEACTIVATED - Success by default)
   app.post("/api/public/send-otp", smsLimiter, async (req, res) => {
-    const { identifier, type, full_name, phone } = req.body;
-    const code = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
-
-    try {
-      // Store OTP
-      db.prepare("INSERT INTO registration_otps (identifier, code, expires_at) VALUES (?, ?, ?)").run(identifier, code, expiresAt);
-      
-      if (type === 'sms' && phone) {
-        // Send via SMS
-        const smsResult = await afroMessage.sendSMS(
-          phone, 
-          `Dreamland College: Your verification code is ${code}. Valid for 10 minutes. Do not share.`
-        );
-        if (smsResult.success) {
-          res.json({ success: true, message: `OTP sent to ${phone}`, method: 'sms', messageId: smsResult.messageId });
-        } else {
-          res.status(500).json({ error: 'Failed to send SMS. Please try again.', details: smsResult.error });
-        }
-      } else {
-        // Fallback to Email
-        await emailService.sendNotification(
-          identifier, 
-          '🎓 Dreamland College Verification', 
-          `Hello ${full_name || 'Student'},\n\nYour verification code for registration is: ${code}\n\nThis code will expire in 10 minutes.`
-        );
-        res.json({ success: true, message: `OTP sent to ${identifier}`, method: 'email' });
-      }
-    } catch (err: any) {
-      res.status(500).json({ error: 'Failed to send verification code. Please try again.' });
-    }
+    // Return success immediately as we no longer require OTP verification
+    res.json({ success: true, message: 'OTP verification is currently bypassed' });
   });
 
   app.post("/api/public/verify-otp", (req, res) => {
-    const { identifier, code } = req.body;
-    const now = new Date().toISOString();
-    
-    const record = db.prepare(`
-      SELECT * FROM registration_otps 
-      WHERE identifier = ? AND code = ? AND verified = 0 AND expires_at > ?
-      ORDER BY created_at DESC LIMIT 1
-    `).get(identifier, code, now) as any;
-
-    if (record) {
-      db.prepare("UPDATE registration_otps SET verified = 1 WHERE id = ?").run(record.id);
-      res.json({ success: true, message: 'Verified successfully' });
-    } else {
-      res.status(400).json({ error: 'Invalid or expired verification code' });
-    }
+    // Return success immediately as we no longer require OTP verification
+    res.json({ success: true, message: 'Verified successfully (bypassed)' });
   });
 
   // SECURITY: Public upload with file type validation and rate limiting
@@ -831,11 +849,16 @@ async function startServer() {
     const year = new Date().getFullYear();
     const count = db.prepare("SELECT COUNT(*) as count FROM students").get() as { count: number };
     const student_id_code = `${branchCode}-${year}-${String(count.count + 1).padStart(4, '0')}`;
+    const username = student_id_code;
 
     try {
-      // Create user first - use phone as username (email removed)
+      const existingPhone = db.prepare("SELECT id FROM students WHERE contact_phone = ?").get(phone) as any;
+      if (existingPhone) {
+        return res.status(400).json({ error: "This phone number is already registered." });
+      }
+
       const userResult = db.prepare("INSERT INTO users (username, password, role, full_name) VALUES (?, ?, ?, ?)").run(
-        phone, hashedPassword, "student", full_name
+        username, hashedPassword, "student", full_name
       );
 
       // Create student
@@ -853,7 +876,7 @@ async function startServer() {
       );
 
       logAction(null, "STUDENT_PUBLIC_REG", { phone, student_id_code });
-      res.json({ id: studentResult.lastInsertRowid, student_id_code });
+      res.json({ id: studentResult.lastInsertRowid, student_id_code, username });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
@@ -1360,11 +1383,16 @@ async function startServer() {
     const year = new Date().getFullYear();
     const count = db.prepare("SELECT COUNT(*) as count FROM students").get() as { count: number };
     const student_id_code = `${branchCode}-${year}-${String(count.count + 1).padStart(4, '0')}`;
+    const username = student_id_code;
 
     try {
-      // Create user first - use phone as username (email removed)
+      const existingPhone = db.prepare("SELECT id FROM students WHERE contact_phone = ?").get(phone) as any;
+      if (existingPhone) {
+        return res.status(400).json({ error: "This phone number is already registered." });
+      }
+
       const userResult = db.prepare("INSERT INTO users (username, password, role, full_name) VALUES (?, ?, ?, ?)").run(
-        phone, hashedPassword, "student", full_name
+        username, hashedPassword, "student", full_name
       );
 
       // Create student
@@ -1383,7 +1411,7 @@ async function startServer() {
       );
 
       logAction((req as any).user.id, "STUDENT_CREATE", { phone, student_id_code });
-      res.json({ id: studentResult.lastInsertRowid, student_id_code });
+      res.json({ id: studentResult.lastInsertRowid, student_id_code, username });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
@@ -1418,11 +1446,17 @@ async function startServer() {
         const year = new Date().getFullYear();
         const count = db.prepare("SELECT COUNT(*) as count FROM students").get() as { count: number };
         const student_id_code = `${branchCode}-${year}-${String(count.count + 1).padStart(4, '0')}`;
+        const username = student_id_code;
 
         try {
-          // Use phone as username (email removed)
+          const existingPhone = db.prepare("SELECT id FROM students WHERE contact_phone = ?").get(phone) as any;
+          if (existingPhone) {
+            results.push({ phone, status: 'error', error: "This phone number is already registered." });
+            continue;
+          }
+
           const userResult = db.prepare("INSERT INTO users (username, password, role, full_name) VALUES (?, ?, ?, ?)").run(
-            phone, hashedPassword, "student", full_name
+            username, hashedPassword, "student", full_name
           );
 
           db.prepare(`
@@ -1430,7 +1464,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?, ?, ?)
           `).run(userResult.lastInsertRowid, student_id_code, branch_id, program_id, program_degree || null, student_type, phone);
 
-          results.push({ phone, status: 'success', student_id_code });
+          results.push({ phone, status: 'success', student_id_code, username });
         } catch (e: any) {
           results.push({ phone, status: 'error', error: e.message });
         }
@@ -2350,10 +2384,10 @@ async function startServer() {
   });
 
   app.post("/api/courses", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
-    const { code, title, credits, prerequisites, is_auditable, program, price_per_credit } = req.body;
+    const { code, title, credits, prerequisites, is_auditable, degree_level } = req.body;
     try {
-      const result = db.prepare("INSERT INTO courses (code, title, credits, prerequisites, is_auditable, program, price_per_credit) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
-        code, title, credits, prerequisites || null, is_auditable ? 1 : 0, program || null, price_per_credit || 0
+      const result = db.prepare("INSERT INTO courses (code, title, credits, prerequisites, is_auditable, degree_level) VALUES (?, ?, ?, ?, ?, ?)").run(
+        code, title, credits, prerequisites || null, is_auditable ? 1 : 0, degree_level || null
       );
       logAction((req as any).user.id, "COURSE_CREATE", { code, title });
       res.json({ id: result.lastInsertRowid, message: "Course created" });
@@ -2372,10 +2406,10 @@ async function startServer() {
   });
 
   app.put("/api/courses/:id", authenticate, authorize(['superadmin', 'branch_admin']), (req, res) => {
-    const { code, title, credits, prerequisites, is_auditable, program, price_per_credit } = req.body;
+    const { code, title, credits, prerequisites, is_auditable, degree_level } = req.body;
     try {
-      db.prepare("UPDATE courses SET code = ?, title = ?, credits = ?, prerequisites = ?, is_auditable = ?, program = ?, price_per_credit = ? WHERE id = ?").run(
-        code, title, credits, prerequisites || null, is_auditable ? 1 : 0, program || null, price_per_credit || 0, req.params.id
+      db.prepare("UPDATE courses SET code = ?, title = ?, credits = ?, prerequisites = ?, is_auditable = ?, degree_level = ? WHERE id = ?").run(
+        code, title, credits, prerequisites || null, is_auditable ? 1 : 0, degree_level || null, req.params.id
       );
       res.json({ message: "Course updated" });
     } catch (e: any) {
@@ -2398,15 +2432,15 @@ async function startServer() {
 
   // --- Program CRUD ---
   app.post("/api/programs", authenticate, authorize(['superadmin']), (req, res) => {
-    const { name, code, duration_years, total_credits } = req.body;
-    const result = db.prepare("INSERT INTO programs (name, code, duration_years, total_credits) VALUES (?, ?, ?, ?)").run(name, code, duration_years, total_credits);
+    const { name, code, duration_years, total_credits, degree_level } = req.body;
+    const result = db.prepare("INSERT INTO programs (name, code, duration_years, total_credits, degree_level) VALUES (?, ?, ?, ?, ?)").run(name, code, duration_years, total_credits, degree_level || null);
     logAction((req as any).user.id, "PROGRAM_CREATE", { name, code });
     res.json({ id: result.lastInsertRowid, message: "Program created" });
   });
 
   app.put("/api/programs/:id", authenticate, authorize(['superadmin']), (req, res) => {
-    const { name, code, duration_years, total_credits } = req.body;
-    db.prepare("UPDATE programs SET name = ?, code = ?, duration_years = ?, total_credits = ? WHERE id = ?").run(name, code, duration_years, total_credits, req.params.id);
+    const { name, code, duration_years, total_credits, degree_level } = req.body;
+    db.prepare("UPDATE programs SET name = ?, code = ?, duration_years = ?, total_credits = ?, degree_level = ? WHERE id = ?").run(name, code, duration_years, total_credits, degree_level || null, req.params.id);
     res.json({ message: "Program updated" });
   });
 
@@ -3898,7 +3932,7 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -3975,16 +4009,6 @@ async function startServer() {
   process.on('SIGINT', () => {
     console.log('\n🛑 SIGINT received. Shutting down gracefully...');
     server.close(async () => {
-      console.log('💾 Database connection closed');
-      await db.close();
-      console.log('✅ Server closed');
-      process.exit(0);
-    });
-  });
-}
-
-startServer();
-.close(async () => {
       console.log('💾 Database connection closed');
       await db.close();
       console.log('✅ Server closed');

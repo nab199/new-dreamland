@@ -23,10 +23,8 @@ import {
   ShieldCheck,
   Shield,
   Check,
-  CheckCheck,
   FileText,
   Download,
-  X,
   Brain,
   BarChart3,
   Database,
@@ -38,8 +36,11 @@ import {
   Calculator,
   TrendingUp,
   AlertCircle,
-  Calendar
+  Calendar,
+  Menu,
+  X
 } from 'lucide-react';
+import Sidebar from '../../Sidebar';
 import axios from 'axios';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -59,6 +60,9 @@ import UserManagement from '../components/UserManagement';
 import IntegrationSettings from '../components/IntegrationSettings';
 import SemesterRegistration from '../components/SemesterRegistration';
 import RegistrationManagement from '../components/RegistrationManagement';
+import NotificationsPanel, {
+  DashboardNotification,
+} from '../components/dashboard/NotificationsPanel';
 
 export default function Dashboard() {
   const { user, logout, token } = useAuth();
@@ -66,6 +70,7 @@ export default function Dashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [students, setStudents] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
   const [calendars, setCalendars] = useState<any[]>([]);
@@ -217,7 +222,7 @@ export default function Dashboard() {
   const [integrationTab, setIntegrationTab] = useState<string | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<DashboardNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [filterOptions, setFilterOptions] = useState({
     branch: '',
@@ -440,49 +445,49 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] flex font-sans selection:bg-emerald-100 selection:text-emerald-900">
-      {/* Sidebar - Premium Minimalist */}
-      <aside className="w-72 bg-white border-r border-stone-100 p-8 flex flex-col sticky top-0 h-screen">
-        <div className="flex items-center gap-3 mb-12 px-2 group cursor-pointer">
-          <div className="w-10 h-10 bg-stone-900 rounded-[1.25rem] flex items-center justify-center text-white transition-transform group-hover:rotate-12 duration-500">
-            <GraduationCap size={22} />
+    <div className="flex h-screen bg-[#f8f9fa] overflow-hidden">
+      {/* Responsive Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-sm"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      <Sidebar 
+        activeId={activeTab}
+        language={i18n.language as any}
+        onNavigate={(id) => {
+          setActiveTab(id);
+          setIsSidebarOpen(false);
+        }}
+        onLogout={() => logout('user_initiated')}
+        isOpen={isSidebarOpen}
+      />
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        {/* Mobile Header */}
+        <div className="lg:hidden h-20 bg-white border-b border-stone-100 flex items-center justify-between px-6 shrink-0 z-30">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-black text-lg">D</div>
+            <span className="font-black text-lg tracking-tighter">DREAMLAND</span>
           </div>
-          <div className="flex flex-col">
-            <span className="text-lg font-black tracking-tighter text-stone-900 leading-none">DREAMLAND</span>
-            <span className="text-[9px] font-black tracking-[0.3em] text-emerald-600 uppercase mt-1">Command Center</span>
+          <div className="flex items-center gap-2">
+            <button className="p-3 text-stone-600 hover:bg-stone-50 rounded-xl">
+              <Search size={20} />
+            </button>
+            <button 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-3 bg-stone-50 text-stone-600 hover:bg-stone-100 rounded-xl transition-all"
+            >
+              {isSidebarOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
           </div>
         </div>
 
-        <nav className="flex-1 space-y-1.5 overflow-y-auto pr-2 custom-scrollbar">
-          <p className="text-[10px] font-black text-stone-300 uppercase tracking-[0.2em] mb-4 px-4">Main Navigation</p>
-          {navigation.map(item => (
-            <SidebarItem key={item.id} id={item.id} icon={item.icon} label={item.label} />
-          ))}
-        </nav>
-
-        <div className="mt-8 pt-8 border-t border-stone-50">
-          <div className="flex items-center gap-3 p-4 bg-stone-50 rounded-[1.5rem] mb-6 group cursor-pointer hover:bg-stone-100 transition-colors">
-            <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-black shadow-lg shadow-emerald-50 transition-transform group-hover:scale-110">
-              {user?.full_name?.[0]}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-black text-stone-900 truncate">{user?.full_name}</p>
-              <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">{user?.role.replace('_', ' ')}</p>
-            </div>
-          </div>
-          <button 
-            onClick={() => logout('user_initiated')}
-            className="w-full flex items-center gap-3 px-5 py-4 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all font-black text-xs uppercase tracking-widest"
-          >
-            <LogOut size={18} />
-            {t('logout')}
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content - High Performance View */}
-      <main className="flex-1 overflow-y-auto p-12 relative">
-        <header className="flex justify-between items-start mb-12">
+        <main className="flex-1 overflow-y-auto p-6 md:p-12 relative custom-scrollbar">
+          <header className="hidden lg:flex justify-between items-start mb-12">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -569,7 +574,7 @@ export default function Dashboard() {
               </div>
             )}
 
-                <div className="glass rounded-[2.5rem] overflow-hidden">
+            <div className="glass rounded-[2.5rem] overflow-hidden">
                   <div className="p-8 border-b border-stone-50 flex justify-between items-center">
                     <div>
                       <h3 className="text-xl font-black text-stone-900">Recent Registrations</h3>
@@ -645,9 +650,7 @@ export default function Dashboard() {
                       </tbody>
                     </table>
                   </div>
-                </div>
-              </>
-            )}
+            </div>
 
             {/* Student Overview */}
             {user?.role === 'student' && (
@@ -831,6 +834,8 @@ export default function Dashboard() {
                 </div>
               </>
             )}
+          </div>
+        )}
 
         {activeTab === 'system-status' && <AdminStatusDashboard />}
         {activeTab === 'ai-features' && <AIFeatures students={students} />}
@@ -1271,152 +1276,21 @@ export default function Dashboard() {
           />
         )}
         {showNotifications && (
-          <div className="fixed inset-0 z-50 overflow-hidden flex items-start justify-end p-4 sm:p-6 pointer-events-none">
-            <div className="absolute inset-0 pointer-events-auto bg-black/5" onClick={() => setShowNotifications(false)} />
-            <div className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl border border-stone-200 pointer-events-auto flex flex-col max-h-[80vh] overflow-hidden mt-16 sm:mt-20">
-              <div className="p-5 border-b border-stone-100 flex items-center justify-between bg-white sticky top-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-stone-900">Notifications</h3>
-                  {unreadCount > 0 && (
-                    <span className="px-2 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded-full">
-                      {unreadCount} NEW
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {unreadCount > 0 && (
-                    <button 
-                      onClick={() => {
-                        axios.post('/api/notifications/read', {}, { headers: { Authorization: `Bearer ${token}` } });
-                        setNotifications(notifications.map(n => ({ ...n, is_read: 1 })));
-                        setUnreadCount(0);
-                      }}
-                      className="text-stone-400 hover:text-emerald-600 transition-colors p-1"
-                      title="Mark all as read"
-                    >
-                      <CheckCheck size={18} />
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => setShowNotifications(false)}
-                    className="text-stone-400 hover:text-stone-600 transition-colors p-1"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-stone-50/50">
-                {notifications.length > 0 ? (
-                  notifications.map((notification) => (
-                    <div 
-                      key={notification.id}
-                      onClick={() => handleMarkNotificationRead(notification.id)}
-                      className={`p-4 rounded-2xl cursor-pointer transition-all border ${
-                        notification.is_read 
-                          ? 'bg-white/50 border-transparent opacity-80' 
-                          : 'bg-white border-emerald-100 shadow-sm'
-                      } hover:bg-stone-50`}
-                    >
-                      <div className="flex gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                          notification.is_read ? 'bg-stone-100 text-stone-400' : 'bg-emerald-50 text-emerald-600'
-                        }`}>
-                          <Bell size={18} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between items-start mb-1">
-                            <h4 className={`text-sm font-bold truncate ${notification.is_read ? 'text-stone-600' : 'text-stone-900'}`}>
-                              {notification.title}
-                            </h4>
-                            <span className="text-[10px] text-stone-400 whitespace-nowrap">
-                              {new Date(notification.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                          <p className={`text-xs leading-relaxed line-clamp-2 ${notification.is_read ? 'text-stone-400' : 'text-stone-500'}`}>
-                            {notification.message}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="py-12 text-center">
-                    <div className="w-12 h-12 bg-stone-100 rounded-2xl flex items-center justify-center text-stone-300 mx-auto mb-3">
-                      <Bell size={24} />
-                    </div>
-                    <p className="text-sm font-medium text-stone-400">No notifications yet</p>
-                  </div>
-                )}
-              </div>
-              
-              <div className="p-3 border-t border-stone-100 text-center bg-white">
-                <button 
-                  onClick={() => setShowNotifications(false)}
-                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700"
-                >
-                  Close panel
-                </button>
-              </div>
-            </div>
-          </div>
+          <NotificationsPanel
+            notifications={notifications}
+            unreadCount={unreadCount}
+            onClose={() => setShowNotifications(false)}
+            onMarkAllRead={async () => {
+              await axios.post('/api/notifications/read', {}, { headers: { Authorization: `Bearer ${token}` } });
+              setNotifications(notifications.map((notification) => ({ ...notification, is_read: 1 })));
+              setUnreadCount(0);
+            }}
+            onMarkRead={handleMarkNotificationRead}
+          />
         )}
         <FloatingAI />
       </main>
     </div>
-  );
-}
-sName={`p-4 rounded-2xl cursor-pointer transition-all border ${
-                        notification.is_read 
-                          ? 'bg-white/50 border-transparent opacity-80' 
-                          : 'bg-white border-emerald-100 shadow-sm'
-                      } hover:bg-stone-50`}
-                    >
-                      <div className="flex gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                          notification.is_read ? 'bg-stone-100 text-stone-400' : 'bg-emerald-50 text-emerald-600'
-                        }`}>
-                          <Bell size={18} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between items-start mb-1">
-                            <h4 className={`text-sm font-bold truncate ${notification.is_read ? 'text-stone-600' : 'text-stone-900'}`}>
-                              {notification.title}
-                            </h4>
-                            <span className="text-[10px] text-stone-400 whitespace-nowrap">
-                              {new Date(notification.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                          <p className={`text-xs leading-relaxed line-clamp-2 ${notification.is_read ? 'text-stone-400' : 'text-stone-500'}`}>
-                            {notification.message}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="py-12 text-center">
-                    <div className="w-12 h-12 bg-stone-100 rounded-2xl flex items-center justify-center text-stone-300 mx-auto mb-3">
-                      <Bell size={24} />
-                    </div>
-                    <p className="text-sm font-medium text-stone-400">No notifications yet</p>
-                  </div>
-                )}
-              </div>
-              
-              <div className="p-3 border-t border-stone-100 text-center bg-white">
-                <button 
-                  onClick={() => setShowNotifications(false)}
-                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700"
-                >
-                  Close panel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        <FloatingAI />
-      </main>
-    </div>
+  </div>
   );
 }

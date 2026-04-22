@@ -272,6 +272,4 @@ export default function SemesterRegistration({ onRegistered }: SemesterRegistrat
       </div>
     </div>
   );
-});
-};
 }
